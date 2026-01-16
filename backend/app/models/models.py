@@ -39,7 +39,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    github_access_token: Mapped[str] = mapped_column(String(255))
+    github_access_token: Mapped[str] = mapped_column(String(500))  # Encrypted token
 
     # Subscription/limits
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

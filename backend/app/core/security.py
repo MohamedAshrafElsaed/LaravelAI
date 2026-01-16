@@ -1,7 +1,14 @@
 """
 Security utilities and authentication dependencies.
 """
+import base64
+import os
+from datetime import datetime, timedelta
 from typing import Optional
+
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
@@ -14,6 +21,84 @@ from app.models.models import User
 
 # Bearer token extractor
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+# --- Token Encryption Utilities ---
+
+def _get_fernet_key() -> bytes:
+    """Derive a Fernet key from the secret key using PBKDF2."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"laravelai_salt",  # Static salt - key is already secret
+        iterations=100_000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(settings.secret_key.encode()))
+    return key
+
+
+def encrypt_token(token: str) -> str:
+    """Encrypt a token (e.g., GitHub access token) for secure storage."""
+    fernet = Fernet(_get_fernet_key())
+    encrypted = fernet.encrypt(token.encode())
+    return encrypted.decode()
+
+
+def decrypt_token(encrypted_token: str) -> str:
+    """Decrypt a stored token."""
+    fernet = Fernet(_get_fernet_key())
+    decrypted = fernet.decrypt(encrypted_token.encode())
+    return decrypted.decode()
+
+
+# --- JWT Utilities ---
+
+def create_access_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:
+    """
+    Create a JWT access token for a user.
+
+    Args:
+        user_id: The user's UUID
+        expires_delta: Optional custom expiration time
+
+    Returns:
+        Encoded JWT token string
+    """
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.access_token_expire_minutes
+        )
+
+    payload = {
+        "sub": user_id,
+        "exp": expire,
+        "iat": datetime.utcnow(),
+        "type": "access",
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def verify_token(token: str) -> Optional[dict]:
+    """
+    Verify and decode a JWT token.
+
+    Args:
+        token: The JWT token string
+
+    Returns:
+        Decoded payload dict if valid, None if invalid/expired
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+        )
+        return payload
+    except JWTError:
+        return None
 
 
 async def get_current_user(

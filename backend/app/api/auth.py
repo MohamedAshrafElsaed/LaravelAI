@@ -1,5 +1,4 @@
 """GitHub OAuth authentication routes."""
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,41 +6,46 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
-from jose import jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import (
+    create_access_token,
+    encrypt_token,
+    get_current_user,
+)
 from app.models.models import User
 
 router = APIRouter()
 
 
 class TokenResponse(BaseModel):
+    """Response model for token endpoints."""
     access_token: str
     token_type: str = "bearer"
-    user: dict
+    user: "UserResponse"
 
 
 class UserResponse(BaseModel):
+    """Response model for user data."""
     id: str
     username: str
-    email: Optional[str]
-    avatar_url: Optional[str]
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
 
-
-def create_access_token(user_id: str) -> str:
-    """Create JWT access token."""
-    expire = datetime.utcnow() + timedelta(
-        minutes=settings.access_token_expire_minutes
-    )
-    payload = {"sub": user_id, "exp": expire}
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+    class Config:
+        from_attributes = True
 
 
 @router.get("/github")
 async def github_login():
-    """Redirect to GitHub OAuth."""
+    """
+    Redirect to GitHub OAuth authorization page.
+
+    This initiates the OAuth flow by redirecting the user to GitHub's
+    authorization endpoint with the configured scopes.
+    """
     github_auth_url = (
         f"https://github.com/login/oauth/authorize"
         f"?client_id={settings.github_client_id}"
@@ -53,10 +57,18 @@ async def github_login():
 
 @router.get("/github/callback")
 async def github_callback(
-        code: str,
-        db: AsyncSession = Depends(get_db),
+    code: str,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Handle GitHub OAuth callback."""
+    """
+    Handle GitHub OAuth callback.
+
+    This endpoint:
+    1. Exchanges the authorization code for an access token
+    2. Fetches user information from GitHub
+    3. Creates or updates the user in our database
+    4. Returns a JWT for subsequent API requests
+    """
     # Exchange code for access token
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
@@ -79,9 +91,10 @@ async def github_callback(
         github_token = token_data.get("access_token")
 
         if not github_token:
+            error = token_data.get("error_description", "No access token received")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No access token received from GitHub",
+                detail=f"GitHub OAuth error: {error}",
             )
 
         # Get user info from GitHub
@@ -92,9 +105,16 @@ async def github_callback(
                 "Accept": "application/json",
             },
         )
+
+        if user_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to fetch user info from GitHub",
+            )
+
         github_user = user_response.json()
 
-        # Get user email
+        # Get user email (may be private)
         email_response = await client.get(
             "https://api.github.com/user/emails",
             headers={
@@ -102,10 +122,13 @@ async def github_callback(
                 "Accept": "application/json",
             },
         )
-        emails = email_response.json()
+        emails = email_response.json() if email_response.status_code == 200 else []
         primary_email = next(
             (e["email"] for e in emails if e.get("primary")), None
         )
+
+    # Encrypt the GitHub token before storage
+    encrypted_token = encrypt_token(github_token)
 
     # Find or create user
     stmt = select(User).where(User.github_id == github_user["id"])
@@ -114,8 +137,9 @@ async def github_callback(
 
     if user:
         # Update existing user
-        user.github_access_token = github_token
+        user.github_access_token = encrypted_token
         user.avatar_url = github_user.get("avatar_url")
+        user.username = github_user["login"]  # Username might change
         if primary_email:
             user.email = primary_email
     else:
@@ -125,13 +149,13 @@ async def github_callback(
             username=github_user["login"],
             email=primary_email,
             avatar_url=github_user.get("avatar_url"),
-            github_access_token=github_token,
+            github_access_token=encrypted_token,
         )
         db.add(user)
 
     await db.flush()
 
-    # Create our JWT
+    # Create our JWT (7-day expiry configured in settings)
     access_token = create_access_token(user.id)
 
     # Redirect to frontend with token
@@ -140,10 +164,20 @@ async def github_callback(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user(
-        db: AsyncSession = Depends(get_db),
-        # TODO: Add auth dependency
+async def get_me(
+    current_user: User = Depends(get_current_user),
 ):
-    """Get current authenticated user."""
-    # This will be implemented with auth dependency
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    """
+    Get the current authenticated user.
+
+    Requires a valid JWT in the Authorization header.
+
+    Returns:
+        UserResponse: The authenticated user's public profile data
+    """
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        avatar_url=current_user.avatar_url,
+    )
