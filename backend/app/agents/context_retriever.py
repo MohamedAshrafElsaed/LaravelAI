@@ -301,7 +301,7 @@ class ContextRetriever:
 
             try:
                 logger.info(f"[CONTEXT_RETRIEVER] Generating embedding for query: '{query}'")
-                query_embedding = await self.embedding_service.embed_text(query)
+                query_embedding = await self.embedding_service.embed_query(query)
 
                 if not query_embedding:
                     logger.error(f"[CONTEXT_RETRIEVER] Failed to generate embedding for query '{query}'")
