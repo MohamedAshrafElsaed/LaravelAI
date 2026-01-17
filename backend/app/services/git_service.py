@@ -585,14 +585,15 @@ class GitService:
                         files_to_remove.append(file_path)
                         logger.debug(f"[GIT] Deleted {file_path}")
 
-            # Stage changes
+            # Stage changes using git commands directly (avoids GitPython index format issues)
             if files_to_add:
-                repo.index.add(files_to_add)
+                repo.git.add(files_to_add)
             if files_to_remove:
-                repo.index.remove(files_to_remove)
+                repo.git.rm(files_to_remove)
 
-            # Create commit
-            commit = repo.index.commit(commit_message)
+            # Create commit using git command directly
+            repo.git.commit("-m", commit_message)
+            commit = repo.head.commit
             logger.info(f"[GIT] Created commit {commit.hexsha[:8]}: {commit_message[:50]}")
 
             return commit.hexsha
