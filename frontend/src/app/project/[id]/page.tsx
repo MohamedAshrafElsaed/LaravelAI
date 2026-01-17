@@ -13,6 +13,7 @@ import {
   PanelLeft,
   Folder,
   GitPullRequest,
+  ShieldCheck,
 } from 'lucide-react';
 
 import { projectsApi } from '@/lib/api';
@@ -23,6 +24,7 @@ import { CodeViewer } from '@/components/CodeViewer';
 import { ChangesReview } from '@/components/ChangesReview';
 import { GitPanel } from '@/components/GitPanel';
 import { GitChangesTracker } from '@/components/GitChangesTracker';
+import { ProjectHealth, HealthScoreBadge } from '@/components/ProjectHealth';
 
 interface Project {
   id: string;
@@ -30,13 +32,21 @@ interface Project {
   repo_full_name: string;
   repo_url: string;
   default_branch: string;
-  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
+  clone_path?: string;
+  status: 'pending' | 'cloning' | 'scanning' | 'analyzing' | 'indexing' | 'ready' | 'error';
   indexed_files_count: number;
   laravel_version: string | null;
   error_message: string | null;
+  // Scanner fields
+  stack?: any;
+  file_stats?: any;
+  health_score?: number;
+  scan_progress?: number;
+  scan_message?: string;
+  scanned_at?: string;
 }
 
-type ViewMode = 'chat' | 'code' | 'changes' | 'git';
+type ViewMode = 'chat' | 'code' | 'changes' | 'git' | 'health';
 
 export default function ProjectPage() {
   const params = useParams();
@@ -130,13 +140,15 @@ export default function ProjectPage() {
     const styles: Record<string, string> = {
       pending: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
       cloning: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
+      scanning: 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
+      analyzing: 'bg-orange-500/20 text-orange-400 border border-orange-500/30',
       indexing: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
       ready: 'bg-green-500/20 text-green-400 border border-green-500/30',
       error: 'bg-red-500/20 text-red-400 border border-red-500/30',
     };
-    const isInProgress = status === 'cloning' || status === 'indexing';
+    const isInProgress = status === 'cloning' || status === 'indexing' || status === 'scanning' || status === 'analyzing';
     return (
-      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles[status]}`}>
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles[status] || styles.pending}`}>
         {isInProgress && (
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-75"></span>
@@ -217,6 +229,9 @@ export default function ProjectPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {project.health_score !== undefined && (
+            <HealthScoreBadge score={project.health_score} />
+          )}
           {getStatusBadge(project.status)}
           <button
             onClick={handleSync}
@@ -319,6 +334,26 @@ export default function ProjectPage() {
                 <GitPullRequest className="h-4 w-4" />
                 Git
               </button>
+              <button
+                onClick={() => setViewMode('health')}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                  viewMode === 'health'
+                    ? 'border-b-2 border-green-500 text-green-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Health
+                {project.health_score !== undefined && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${
+                    project.health_score >= 80 ? 'bg-green-500/20 text-green-400' :
+                    project.health_score >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
+                    'bg-red-500/20 text-red-400'
+                  }`}>
+                    {Math.round(project.health_score)}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* View Content */}
@@ -378,6 +413,13 @@ export default function ProjectPage() {
                     />
                   </div>
                 </div>
+              )}
+
+              {viewMode === 'health' && (
+                <ProjectHealth
+                  projectId={projectId}
+                  clonePath={project?.clone_path}
+                />
               )}
             </div>
           </main>

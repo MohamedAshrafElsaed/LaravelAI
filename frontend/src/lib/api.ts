@@ -260,6 +260,25 @@ export const projectsApi = {
 
   // Delete project
   delete: (id: string) => api.delete(`/projects/${id}`),
+
+  // ========== Project Scanning ==========
+
+  // Start a project scan
+  startScan: (id: string) => api.post(`/projects/${id}/scan`),
+
+  // Get scan status
+  getScanStatus: (id: string) => api.get(`/projects/${id}/scan/status`),
+
+  // Get project health details
+  getHealth: (id: string) => api.get(`/projects/${id}/health`),
+
+  // Get project issues
+  getIssues: (id: string, params?: { category?: string; severity?: string; status?: string }) =>
+    api.get(`/projects/${id}/issues`, { params }),
+
+  // Update issue status
+  updateIssueStatus: (projectId: string, issueId: string, status: string) =>
+    api.patch(`/projects/${projectId}/issues/${issueId}`, null, { params: { status_update: status } }),
 };
 
 export const githubApi = {

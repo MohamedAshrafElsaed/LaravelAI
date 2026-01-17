@@ -17,7 +17,7 @@ from github import Github, GithubException
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.security import get_current_user, decrypt_token
-from app.models.models import Project, ProjectStatus, User, IndexedFile
+from app.models.models import Project, ProjectStatus, User, IndexedFile, ProjectIssue
 from app.services.git_service import GitService, GitServiceError
 from app.services.indexer import (
     ProjectIndexer,
@@ -27,6 +27,9 @@ from app.services.indexer import (
 )
 from app.services.embeddings import EmbeddingProvider
 from app.services.vector_store import VectorStore
+from app.services.stack_detector import StackDetector
+from app.services.file_scanner import FileScanner
+from app.services.health_checker import HealthChecker
 
 router = APIRouter()
 
@@ -51,6 +54,13 @@ class ProjectResponse(BaseModel):
     last_indexed_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    # Scanner fields
+    stack: Optional[dict] = None
+    file_stats: Optional[dict] = None
+    health_score: Optional[float] = None
+    scan_progress: int = 0
+    scan_message: Optional[str] = None
+    scanned_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -59,6 +69,38 @@ class ProjectResponse(BaseModel):
 class ProjectDetailResponse(ProjectResponse):
     """Detailed project response with additional info."""
     php_version: Optional[str]
+    structure: Optional[dict] = None
+    health_check: Optional[dict] = None
+
+
+class ProjectIssueResponse(BaseModel):
+    """Project issue response model."""
+    id: str
+    category: str
+    severity: str
+    title: str
+    description: str
+    file_path: Optional[str]
+    line_number: Optional[int]
+    suggestion: Optional[str]
+    auto_fixable: bool
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScanStatusResponse(BaseModel):
+    """Response model for scan status."""
+    status: str
+    progress: int
+    message: Optional[str]
+    stack: Optional[dict]
+    file_stats: Optional[dict]
+    health_score: Optional[float]
+    health_check: Optional[dict]
+    scanned_at: Optional[str]
 
 
 class IndexingStatusResponse(BaseModel):
@@ -846,3 +888,469 @@ async def get_file_content(
         content=content,
         indexed=indexed_file is not None,
     )
+
+
+# ========== Project Scanning Endpoints ==========
+
+async def scan_project_task(
+    project_id: str,
+) -> None:
+    """
+    Background task to scan a project for stack detection, file stats, and health check.
+
+    Args:
+        project_id: The project's UUID
+    """
+    logger.info(f"[SCAN_TASK] Starting scan task for project_id={project_id}")
+
+    # Create a new database session for background task
+    engine = create_async_engine(settings.database_url)
+    async_session = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async with async_session() as db:
+        try:
+            # Fetch project
+            stmt = select(Project).where(Project.id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                logger.error(f"[SCAN_TASK] Project not found: {project_id}")
+                await engine.dispose()
+                return
+
+            if not project.clone_path:
+                logger.error(f"[SCAN_TASK] Project has no clone_path: {project_id}")
+                project.status = ProjectStatus.ERROR.value
+                project.error_message = "Project has not been cloned yet"
+                await db.commit()
+                await engine.dispose()
+                return
+
+            logger.info(f"[SCAN_TASK] Scanning project: {project.repo_full_name}")
+
+            # Update status to scanning
+            project.status = ProjectStatus.SCANNING.value
+            project.scan_progress = 0
+            project.scan_message = "Starting scan..."
+            await db.commit()
+
+            # ========== PHASE 1: Stack Detection (10%) ==========
+            logger.info(f"[SCAN_TASK] Phase 1: Stack detection")
+            project.scan_progress = 5
+            project.scan_message = "Detecting technology stack..."
+            await db.commit()
+
+            stack_detector = StackDetector(project.clone_path)
+            stack = stack_detector.detect()
+            project.stack = stack
+            project.scan_progress = 10
+            await db.commit()
+
+            # Extract Laravel version from stack
+            backend = stack.get("backend", {})
+            if backend.get("framework") == "laravel":
+                project.laravel_version = backend.get("version")
+                project.php_version = backend.get("php_version")
+
+            logger.info(f"[SCAN_TASK] Stack detected: {backend.get('framework', 'unknown')}")
+
+            # ========== PHASE 2: File Scanning (40%) ==========
+            logger.info(f"[SCAN_TASK] Phase 2: File scanning")
+            project.status = ProjectStatus.SCANNING.value
+            project.scan_progress = 15
+            project.scan_message = "Scanning files..."
+            await db.commit()
+
+            def update_scan_progress(count: int, message: str):
+                # This is called synchronously, so we can't update DB here
+                pass
+
+            file_scanner = FileScanner(project.clone_path)
+            file_stats = file_scanner.scan(progress_callback=update_scan_progress)
+            project.file_stats = file_stats
+
+            # Get structure analysis
+            structure = file_scanner.get_structure_analysis()
+            project.structure = structure
+
+            project.scan_progress = 50
+            project.scan_message = f"Scanned {file_stats.get('total_files', 0)} files"
+            await db.commit()
+
+            logger.info(f"[SCAN_TASK] File scan complete: {file_stats.get('total_files', 0)} files")
+
+            # ========== PHASE 3: Health Check (80%) ==========
+            logger.info(f"[SCAN_TASK] Phase 3: Health check")
+            project.status = ProjectStatus.ANALYZING.value
+            project.scan_progress = 60
+            project.scan_message = "Running health checks..."
+            await db.commit()
+
+            health_checker = HealthChecker(project.clone_path, stack, file_stats)
+            health_result = health_checker.check()
+
+            project.health_score = health_result.get("score")
+            project.health_check = health_result
+            project.scan_progress = 80
+            await db.commit()
+
+            logger.info(f"[SCAN_TASK] Health check complete: score={health_result.get('score')}")
+
+            # ========== PHASE 4: Save Issues (90%) ==========
+            logger.info(f"[SCAN_TASK] Phase 4: Saving issues")
+            project.scan_progress = 85
+            project.scan_message = "Saving issues..."
+            await db.commit()
+
+            # Delete existing issues
+            from sqlalchemy import delete
+            await db.execute(
+                delete(ProjectIssue).where(ProjectIssue.project_id == project_id)
+            )
+
+            # Save new issues
+            issues = health_checker.get_issues()
+            for issue in issues:
+                db_issue = ProjectIssue(
+                    project_id=project_id,
+                    category=issue.category,
+                    severity=issue.severity.value,
+                    title=issue.title,
+                    description=issue.description,
+                    file_path=issue.file_path,
+                    line_number=issue.line_number,
+                    suggestion=issue.suggestion,
+                    auto_fixable=issue.auto_fixable,
+                )
+                db.add(db_issue)
+
+            await db.commit()
+            logger.info(f"[SCAN_TASK] Saved {len(issues)} issues")
+
+            # ========== COMPLETE ==========
+            project.scan_progress = 100
+            project.scan_message = "Scan complete"
+            project.scanned_at = datetime.utcnow()
+            project.status = ProjectStatus.READY.value
+            project.error_message = None
+            await db.commit()
+
+            logger.info(f"[SCAN_TASK] Scan completed for project_id={project_id}")
+
+        except Exception as e:
+            logger.exception(f"[SCAN_TASK] Error scanning project {project_id}: {str(e)}")
+            # Update project with error
+            stmt = select(Project).where(Project.id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+            if project:
+                project.status = ProjectStatus.ERROR.value
+                project.error_message = f"Scan failed: {str(e)}"
+                project.scan_progress = 0
+                await db.commit()
+
+    await engine.dispose()
+    logger.info(f"[SCAN_TASK] Scan task completed for project_id={project_id}")
+
+
+@router.post("/{project_id}/scan", response_model=ProjectResponse)
+async def start_scan(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Start a project scan for stack detection, file analysis, and health check.
+
+    This will trigger a background job to:
+    1. Detect technology stack (frameworks, versions, packages)
+    2. Scan all files and collect statistics
+    3. Run health checks for production readiness
+    4. Save issues found during analysis
+    """
+    logger.info(f"[API] POST /projects/{project_id}/scan - user_id={current_user.id}")
+
+    # Fetch project
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        logger.warning(f"[API] Project not found for scanning: {project_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    logger.info(f"[API] Project found: {project.repo_full_name}, current status={project.status}")
+
+    if project.status in [ProjectStatus.SCANNING.value, ProjectStatus.ANALYZING.value]:
+        logger.warning(f"[API] Project {project_id} is already being scanned")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Project is already being scanned.",
+        )
+
+    if project.status in [ProjectStatus.CLONING.value, ProjectStatus.INDEXING.value]:
+        logger.warning(f"[API] Project {project_id} is currently {project.status}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Project is currently being {project.status}. Wait for it to complete.",
+        )
+
+    if not project.clone_path:
+        logger.warning(f"[API] Project {project_id} has no clone_path")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has not been cloned yet. Clone the repository first.",
+        )
+
+    # Update status to scanning
+    project.status = ProjectStatus.SCANNING.value
+    project.scan_progress = 0
+    project.scan_message = "Starting scan..."
+    project.error_message = None
+    await db.commit()
+    await db.refresh(project)
+    logger.info(f"[API] Project status updated to SCANNING")
+
+    # Trigger background scan job
+    logger.info(f"[API] Triggering background scan task for project_id={project.id}")
+    background_tasks.add_task(
+        scan_project_task,
+        str(project.id),
+    )
+
+    logger.info(f"[API] POST /projects/{project_id}/scan completed")
+    return project
+
+
+@router.get("/{project_id}/scan/status", response_model=ScanStatusResponse)
+async def get_scan_status(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the current scan status for a project.
+
+    Returns scan progress, stack info, file stats, and health check results.
+    """
+    logger.debug(f"[API] GET /projects/{project_id}/scan/status - user_id={current_user.id}")
+
+    # Verify project access
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        logger.warning(f"[API] Project not found for scan status: {project_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    # Determine status string
+    if project.status == ProjectStatus.SCANNING.value:
+        status_str = "scanning"
+    elif project.status == ProjectStatus.ANALYZING.value:
+        status_str = "analyzing"
+    elif project.status == ProjectStatus.ERROR.value:
+        status_str = "error"
+    elif project.scanned_at:
+        status_str = "completed"
+    else:
+        status_str = "pending"
+
+    return ScanStatusResponse(
+        status=status_str,
+        progress=project.scan_progress,
+        message=project.scan_message or project.error_message,
+        stack=project.stack,
+        file_stats=project.file_stats,
+        health_score=project.health_score,
+        health_check=project.health_check,
+        scanned_at=project.scanned_at.isoformat() if project.scanned_at else None,
+    )
+
+
+@router.get("/{project_id}/issues", response_model=List[ProjectIssueResponse])
+async def get_project_issues(
+    project_id: str,
+    category: Optional[str] = None,
+    severity: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get all issues for a project.
+
+    Optionally filter by category (security, performance, etc.),
+    severity (critical, warning, info), or status (open, fixed, ignored).
+    """
+    logger.info(f"[API] GET /projects/{project_id}/issues - user_id={current_user.id}")
+
+    # Verify project access
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    # Build query for issues
+    query = select(ProjectIssue).where(ProjectIssue.project_id == project_id)
+
+    if category:
+        query = query.where(ProjectIssue.category == category)
+    if severity:
+        query = query.where(ProjectIssue.severity == severity)
+    if status_filter:
+        query = query.where(ProjectIssue.status == status_filter)
+
+    query = query.order_by(
+        # Order by severity (critical first)
+        ProjectIssue.severity.desc(),
+        ProjectIssue.created_at.desc(),
+    )
+
+    result = await db.execute(query)
+    issues = result.scalars().all()
+
+    logger.info(f"[API] Returning {len(issues)} issues for project {project_id}")
+    return issues
+
+
+@router.patch("/{project_id}/issues/{issue_id}", response_model=ProjectIssueResponse)
+async def update_issue_status(
+    project_id: str,
+    issue_id: str,
+    status_update: str,  # 'fixed' or 'ignored'
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update the status of a project issue.
+
+    Set status to 'fixed' when the issue has been resolved,
+    or 'ignored' to dismiss the issue.
+    """
+    logger.info(f"[API] PATCH /projects/{project_id}/issues/{issue_id} - status={status_update}")
+
+    # Verify project access
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    # Fetch issue
+    stmt = select(ProjectIssue).where(
+        ProjectIssue.id == issue_id,
+        ProjectIssue.project_id == project_id,
+    )
+    result = await db.execute(stmt)
+    issue = result.scalar_one_or_none()
+
+    if not issue:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found.",
+        )
+
+    if status_update not in ["fixed", "ignored", "open"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid status. Must be 'fixed', 'ignored', or 'open'.",
+        )
+
+    issue.status = status_update
+    await db.commit()
+    await db.refresh(issue)
+
+    logger.info(f"[API] Issue {issue_id} status updated to {status_update}")
+    return issue
+
+
+@router.get("/{project_id}/health", response_model=dict)
+async def get_project_health(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed health check results for a project.
+
+    Returns the full health check breakdown by category,
+    including score and issues for each area.
+    """
+    logger.info(f"[API] GET /projects/{project_id}/health - user_id={current_user.id}")
+
+    # Verify project access
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    if not project.health_check:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has not been scanned yet. Run a scan first.",
+        )
+
+    # Count issues by status
+    stmt = select(ProjectIssue).where(ProjectIssue.project_id == project_id)
+    result = await db.execute(stmt)
+    all_issues = result.scalars().all()
+
+    issues_summary = {
+        "total": len(all_issues),
+        "open": len([i for i in all_issues if i.status == "open"]),
+        "fixed": len([i for i in all_issues if i.status == "fixed"]),
+        "ignored": len([i for i in all_issues if i.status == "ignored"]),
+        "by_severity": {
+            "critical": len([i for i in all_issues if i.severity == "critical" and i.status == "open"]),
+            "warning": len([i for i in all_issues if i.severity == "warning" and i.status == "open"]),
+            "info": len([i for i in all_issues if i.severity == "info" and i.status == "open"]),
+        },
+    }
+
+    return {
+        "score": project.health_score,
+        "production_ready": project.health_check.get("production_ready", False),
+        "categories": project.health_check.get("categories", {}),
+        "issues_summary": issues_summary,
+        "scanned_at": project.scanned_at.isoformat() if project.scanned_at else None,
+    }

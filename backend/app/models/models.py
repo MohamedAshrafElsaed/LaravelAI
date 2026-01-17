@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, Integer, String, Text,
-    Enum as SQLEnum, Index, JSON
+    Enum as SQLEnum, Index, JSON, Float
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -23,9 +23,23 @@ def generate_uuid() -> str:
 class ProjectStatus(str, Enum):
     PENDING = "pending"
     CLONING = "cloning"
+    SCANNING = "scanning"
+    ANALYZING = "analyzing"
     INDEXING = "indexing"
     READY = "ready"
     ERROR = "error"
+
+
+class IssueSeverity(str, Enum):
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class IssueStatus(str, Enum):
+    OPEN = "open"
+    FIXED = "fixed"
+    IGNORED = "ignored"
 
 
 class User(Base):
@@ -96,11 +110,37 @@ class Project(Base):
     indexed_files_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Laravel specific metadata
+    # Laravel specific metadata (legacy - now part of stack)
     laravel_version: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True
     )
     php_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # Stack Detection (detected framework, versions, packages)
+    stack: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Example: {"backend": {"framework": "laravel", "version": "12.0"}, "frontend": {"framework": "vue", "version": "3.5"}}
+
+    # File Statistics
+    file_stats: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Example: {"total_files": 1020, "total_lines": 150000, "by_type": {...}, "by_category": {...}}
+
+    # Structure Analysis
+    structure: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Example: {"directories": [...], "key_files": [...], "patterns_detected": ["repository", "service-layer"]}
+
+    # Health Check Results
+    health_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-100
+    health_check: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Example: {"score": 72, "categories": {...}, "critical_issues": [...], "warnings": [...]}
+
+    # AI Context (internal - user doesn't see raw form)
+    ai_context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Example: {"claude_md_content": "...", "key_patterns": [...], "conventions": {...}}
+
+    # Scan Progress
+    scan_progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    scan_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -112,6 +152,9 @@ class Project(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="projects")
+    issues: Mapped[list["ProjectIssue"]] = relationship(
+        "ProjectIssue", back_populates="project", cascade="all, delete-orphan"
+    )
     indexed_files: Mapped[list["IndexedFile"]] = relationship(
         "IndexedFile", back_populates="project", cascade="all, delete-orphan"
     )
@@ -332,4 +375,61 @@ class GitChange(Base):
     project: Mapped["Project"] = relationship("Project", back_populates="git_changes")
     message: Mapped[Optional["Message"]] = relationship(
         "Message", back_populates="git_changes"
+    )
+
+
+class ProjectIssue(Base):
+    """
+    Health check issues found in a project.
+
+    Tracks security, performance, architecture, and other issues
+    detected during project scanning and health checks.
+    """
+
+    __tablename__ = "project_issues"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=generate_uuid
+    )
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE")
+    )
+
+    # Issue categorization
+    category: Mapped[str] = mapped_column(String(50))  # security, performance, architecture, etc.
+    severity: Mapped[str] = mapped_column(
+        String(20), default=IssueSeverity.INFO.value
+    )  # critical, warning, info
+
+    # Issue details
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+
+    # Location (optional)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    line_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Fix information
+    suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    auto_fixable: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), default=IssueStatus.OPEN.value
+    )  # open, fixed, ignored
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    project: Mapped["Project"] = relationship("Project", back_populates="issues")
+
+    __table_args__ = (
+        Index("ix_project_issues_project_category", "project_id", "category"),
+        Index("ix_project_issues_severity", "severity"),
     )
