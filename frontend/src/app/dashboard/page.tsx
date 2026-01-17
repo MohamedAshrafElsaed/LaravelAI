@@ -36,10 +36,9 @@ interface GitHubRepo {
 export default function Dashboard() {
   const router = useRouter();
   const toast = useToast();
-  const { isAuthenticated, user, logout } = useAuthStore();
+  const { isAuthenticated, user, logout, isHydrated } = useAuthStore();
   const { projects, setProjects, addProject } = useProjectsStore();
   const [loading, setLoading] = useState(true);
-  const [mounted, setMounted] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal state
@@ -49,10 +48,6 @@ export default function Dashboard() {
   const [reposError, setReposError] = useState<string | null>(null);
   const [addingRepoId, setAddingRepoId] = useState<number | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const fetchProjects = useCallback(async (showRefreshToast = false) => {
     try {
@@ -70,16 +65,17 @@ export default function Dashboard() {
     }
   }, [setProjects, toast]);
 
+  // Wait for hydration before checking authentication
   useEffect(() => {
-    if (mounted && !isAuthenticated) {
+    if (!isHydrated) return; // Wait for store to hydrate from localStorage
+
+    if (!isAuthenticated) {
       router.push('/');
       return;
     }
 
-    if (mounted && isAuthenticated) {
-      fetchProjects();
-    }
-  }, [mounted, isAuthenticated, router, fetchProjects]);
+    fetchProjects();
+  }, [isHydrated, isAuthenticated, router, fetchProjects]);
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -95,7 +91,7 @@ export default function Dashboard() {
       (p) => p.status === 'cloning' || p.status === 'indexing'
     );
 
-    if (inProgressProjects.length === 0 || !mounted || !isAuthenticated) {
+    if (inProgressProjects.length === 0 || !isHydrated || !isAuthenticated) {
       return;
     }
 
@@ -122,7 +118,7 @@ export default function Dashboard() {
     }, 2000);
 
     return () => clearInterval(pollInterval);
-  }, [projects, mounted, isAuthenticated, updateProject]);
+  }, [projects, isHydrated, isAuthenticated, updateProject]);
 
   const fetchGitHubRepos = useCallback(async () => {
     setReposLoading(true);
@@ -193,7 +189,18 @@ export default function Dashboard() {
     return projects.some(p => p.repo_full_name === repos.find(r => r.id === repoId)?.full_name);
   }, [projects, repos]);
 
-  if (!mounted) return null;
+  // Show loading while hydrating
+  if (!isHydrated) {
+    return (
+      <div className="container mx-auto max-w-6xl px-4 py-8">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonProjectCard key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const getStatusBadge = (status: Project['status']) => {
     return <IndexingBadge status={status} />;

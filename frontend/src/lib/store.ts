@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 // User type
 interface User {
@@ -26,16 +26,19 @@ interface AuthState {
   token: string | null;
   user: User | null;
   isAuthenticated: boolean;
+  isHydrated: boolean;
   setAuth: (token: string, user: User) => void;
   logout: () => void;
+  setHydrated: () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
       user: null,
       isAuthenticated: false,
+      isHydrated: false,
       setAuth: (token, user) => {
         localStorage.setItem('auth_token', token);
         set({ token, user, isAuthenticated: true });
@@ -44,10 +47,30 @@ export const useAuthStore = create<AuthState>()(
         localStorage.removeItem('auth_token');
         set({ token: null, user: null, isAuthenticated: false });
       },
+      setHydrated: () => set({ isHydrated: true }),
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ token: state.token, user: state.user }),
+      storage: createJSONStorage(() => localStorage),
+      // Persist token, user, AND isAuthenticated
+      partialize: (state) => ({
+        token: state.token,
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
+      // Called when state is rehydrated from storage
+      onRehydrateStorage: () => (state) => {
+        // Verify token still exists in localStorage (in case it was cleared elsewhere)
+        if (typeof window !== 'undefined') {
+          const storedToken = localStorage.getItem('auth_token');
+          if (state && !storedToken) {
+            // Token was cleared from localStorage, clear auth state
+            state.logout();
+          }
+        }
+        // Mark as hydrated
+        state?.setHydrated();
+      },
     }
   )
 );
