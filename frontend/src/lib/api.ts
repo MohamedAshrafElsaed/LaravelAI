@@ -1,7 +1,129 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 // API base URL from environment
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+
+// ============================================================================
+// Retry Configuration
+// ============================================================================
+
+interface RetryConfig {
+  retries: number;
+  retryDelay: number;
+  retryCondition: (error: AxiosError) => boolean;
+}
+
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  retries: 3,
+  retryDelay: 1000, // Start with 1 second
+  retryCondition: (error: AxiosError) => {
+    // Retry on network errors or 5xx server errors
+    if (!error.response) return true; // Network error
+    const status = error.response.status;
+    return status >= 500 || status === 429; // Server error or rate limited
+  },
+};
+
+// Sleep utility for retry delay
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Retry logic with exponential backoff
+async function retryRequest(
+  config: InternalAxiosRequestConfig,
+  error: AxiosError,
+  retryCount: number,
+  maxRetries: number,
+  baseDelay: number
+): Promise<AxiosResponse> {
+  if (retryCount >= maxRetries) {
+    throw error;
+  }
+
+  // Exponential backoff: delay * 2^retryCount (1s, 2s, 4s, ...)
+  const delay = baseDelay * Math.pow(2, retryCount);
+  console.log(`Retrying request (${retryCount + 1}/${maxRetries}) after ${delay}ms...`);
+
+  await sleep(delay);
+
+  // Create a new config to avoid mutation
+  const retryConfig = { ...config };
+  // Mark this as a retry
+  (retryConfig as any).__retryCount = retryCount + 1;
+
+  return api.request(retryConfig);
+}
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+export interface ApiErrorDetail {
+  code: string;
+  message: string;
+  field?: string;
+  details?: Record<string, any>;
+}
+
+export interface ApiErrorResponse {
+  success: false;
+  error: ApiErrorDetail;
+  request_id?: string;
+}
+
+export class ApiError extends Error {
+  code: string;
+  status: number;
+  field?: string;
+  details?: Record<string, any>;
+  requestId?: string;
+
+  constructor(
+    message: string,
+    code: string,
+    status: number,
+    field?: string,
+    details?: Record<string, any>,
+    requestId?: string
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.status = status;
+    this.field = field;
+    this.details = details;
+    this.requestId = requestId;
+  }
+
+  static fromAxiosError(error: AxiosError<ApiErrorResponse>): ApiError {
+    if (error.response?.data?.error) {
+      const { code, message, field, details } = error.response.data.error;
+      return new ApiError(
+        message,
+        code,
+        error.response.status,
+        field,
+        details,
+        error.response.data.request_id
+      );
+    }
+
+    // Fallback for non-standard errors
+    const status = error.response?.status || 0;
+    const message = error.response?.data
+      ? (typeof error.response.data === 'string' ? error.response.data : 'An error occurred')
+      : error.message;
+
+    return new ApiError(
+      message,
+      status === 0 ? 'NETWORK_ERROR' : `HTTP_${status}`,
+      status
+    );
+  }
+}
+
+// ============================================================================
+// Axios Instance
+// ============================================================================
 
 // Create axios instance
 export const api = axios.create({
@@ -27,20 +149,88 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle errors
+// Response interceptor - handle errors with retry
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError<ApiErrorResponse>) => {
+    const config = error.config as InternalAxiosRequestConfig & { __retryCount?: number };
+    const retryCount = config?.__retryCount || 0;
+    const { retries, retryDelay, retryCondition } = DEFAULT_RETRY_CONFIG;
+
+    // Check if we should retry
+    if (config && retryCount < retries && retryCondition(error)) {
+      try {
+        return await retryRequest(config, error, retryCount, retries, retryDelay);
+      } catch (retryError) {
+        // If retry fails, continue to error handling below
+        error = retryError as AxiosError<ApiErrorResponse>;
+      }
+    }
+
+    // Handle 401 - redirect to login
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
       if (typeof window !== 'undefined') {
         localStorage.removeItem('auth_token');
         window.location.href = '/login';
       }
     }
-    return Promise.reject(error);
+
+    // Transform to ApiError for better error handling
+    const apiError = ApiError.fromAxiosError(error);
+
+    // Log error in development
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API Error]', {
+        code: apiError.code,
+        message: apiError.message,
+        status: apiError.status,
+        requestId: apiError.requestId,
+      });
+    }
+
+    return Promise.reject(apiError);
   }
 );
+
+// ============================================================================
+// Error Helper Functions
+// ============================================================================
+
+/**
+ * Extract user-friendly error message from any error
+ */
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return 'An unexpected error occurred';
+}
+
+/**
+ * Check if error is a network error
+ */
+export function isNetworkError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.code === 'NETWORK_ERROR';
+  }
+  if (error instanceof AxiosError) {
+    return !error.response;
+  }
+  return false;
+}
+
+/**
+ * Check if error is a specific error code
+ */
+export function isErrorCode(error: unknown, code: string): boolean {
+  return error instanceof ApiError && error.code === code;
+}
 
 // API helper functions
 export const authApi = {

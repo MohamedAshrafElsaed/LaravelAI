@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { Providers } from './providers';
 
 // Use system font stack instead of Google Fonts for reliability
 const fontClass = 'font-sans';
@@ -17,6 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${fontClass} min-h-screen bg-gray-950 text-gray-200 antialiased`}>
+        <Providers>
         <div className="relative flex min-h-screen flex-col">
           {/* Navigation */}
           <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-gray-950/95 backdrop-blur">
@@ -68,6 +70,7 @@ export default function RootLayout({
             </div>
           </footer>
         </div>
+        </Providers>
       </body>
     </html>
   );

@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # Frontend
     frontend_url: str = "http://localhost:3000"
 
+    # Logging
+    log_level: str = "INFO"
+    log_dir: str = ""  # Empty means console only, set to path for file logging
+    log_json: bool = False  # Use JSON format for logs (recommended for production)
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

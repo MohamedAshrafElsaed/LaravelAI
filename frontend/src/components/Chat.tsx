@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, User, Bot, Loader2, Plus, Trash2, MessageSquare, History } from 'lucide-react';
+import { Send, User, Bot, Loader2, Plus, Trash2, MessageSquare, History, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { InlineProgress } from './InlineProgress';
-import { chatApi } from '@/lib/api';
+import { chatApi, getErrorMessage } from '@/lib/api';
+import { useToast } from './Toast';
+import { SkeletonConversationList, SkeletonChatMessages } from './ui/Skeleton';
+import { Button } from './ui/Button';
 
 interface Message {
   id: string;
@@ -57,6 +60,7 @@ export function Chat({
   onProcessingEvent,
   onConversationChange,
 }: ChatProps) {
+  const toast = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -69,6 +73,8 @@ export function Chat({
   const [showHistory, setShowHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -78,16 +84,18 @@ export function Chat({
     try {
       const response = await chatApi.listConversations(projectId);
       setConversations(response.data);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
+    } catch (err) {
+      console.error('Failed to load conversations:', err);
+      toast.error('Failed to load conversations', getErrorMessage(err));
     } finally {
       setLoadingHistory(false);
     }
-  }, [projectId]);
+  }, [projectId, toast]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (convId: string) => {
     setLoadingMessages(true);
+    setError(null);
     try {
       const response = await chatApi.getMessages(projectId, convId);
       const loadedMessages: Message[] = response.data.map((msg: any) => ({
@@ -102,12 +110,15 @@ export function Chat({
 
       // Save to localStorage
       localStorage.setItem(`conversation_${projectId}`, convId);
-    } catch (error) {
-      console.error('Failed to load messages:', error);
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+      const message = getErrorMessage(err);
+      setError(message);
+      toast.error('Failed to load messages', message);
     } finally {
       setLoadingMessages(false);
     }
-  }, [projectId]);
+  }, [projectId, toast]);
 
   // Load saved conversation on mount
   useEffect(() => {
@@ -153,14 +164,19 @@ export function Chat({
     e.stopPropagation();
     if (!confirm('Delete this conversation?')) return;
 
+    setDeletingConvId(convId);
     try {
       await chatApi.deleteConversation(projectId, convId);
       setConversations((prev) => prev.filter((c) => c.id !== convId));
       if (convId === conversationId) {
         startNewConversation();
       }
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
+      toast.success('Conversation deleted');
+    } catch (err) {
+      console.error('Failed to delete conversation:', err);
+      toast.error('Failed to delete conversation', getErrorMessage(err));
+    } finally {
+      setDeletingConvId(null);
     }
   };
 
@@ -326,15 +342,18 @@ export function Chat({
 
       // Refresh conversations list
       loadConversations();
-    } catch (error) {
-      console.error('Chat error:', error);
+    } catch (err) {
+      console.error('Chat error:', err);
+      const errorText = getErrorMessage(err);
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: 'Sorry, an error occurred. Please try again.',
+        content: `Sorry, an error occurred: ${errorText}. Please try again.`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+      setError(errorText);
+      toast.error('Chat error', errorText);
     } finally {
       setIsLoading(false);
       setIsStreaming(false);
@@ -386,9 +405,7 @@ export function Chat({
       {showHistory && (
         <div className="border-b border-gray-800 bg-gray-900/50 max-h-64 overflow-y-auto">
           {loadingHistory ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
-            </div>
+            <SkeletonConversationList />
           ) : conversations.length === 0 ? (
             <div className="py-8 text-center text-sm text-gray-500">
               No previous conversations
@@ -420,9 +437,14 @@ export function Chat({
                   </div>
                   <button
                     onClick={(e) => deleteConversation(conv.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"
+                    disabled={deletingConvId === conv.id}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity disabled:opacity-100 disabled:cursor-wait"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    {deletingConvId === conv.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
                   </button>
                 </button>
               ))}
@@ -434,8 +456,20 @@ export function Chat({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {loadingMessages ? (
+          <SkeletonChatMessages />
+        ) : error && messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+            <div className="text-center text-red-400">
+              <AlertCircle className="mx-auto h-12 w-12 mb-4 opacity-50" />
+              <p className="text-lg font-medium">Failed to load messages</p>
+              <p className="text-sm mt-1 text-gray-500">{error}</p>
+              <button
+                onClick={() => conversationId && loadMessages(conversationId)}
+                className="mt-4 text-blue-400 hover:text-blue-300"
+              >
+                Try again
+              </button>
+            </div>
           </div>
         ) : messages.length === 0 && !isStreaming ? (
           <div className="flex h-full items-center justify-center">

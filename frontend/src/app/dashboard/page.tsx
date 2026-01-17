@@ -3,7 +3,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, useProjectsStore } from '@/lib/store';
-import { projectsApi, githubApi } from '@/lib/api';
+import { projectsApi, githubApi, getErrorMessage } from '@/lib/api';
+import { useToast } from '@/components/Toast';
+import { SkeletonProjectCard } from '@/components/ui/Skeleton';
+import { Button } from '@/components/ui/Button';
+import { IndexingBadge } from '@/components/IndexingProgress';
+import { Loader2, Plus, Trash2, RefreshCw } from 'lucide-react';
 
 interface Project {
   id: string;
@@ -30,10 +35,12 @@ interface GitHubRepo {
 
 export default function Dashboard() {
   const router = useRouter();
+  const toast = useToast();
   const { isAuthenticated, user, logout } = useAuthStore();
   const { projects, setProjects, addProject } = useProjectsStore();
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,10 +48,27 @@ export default function Dashboard() {
   const [reposLoading, setReposLoading] = useState(false);
   const [reposError, setReposError] = useState<string | null>(null);
   const [addingRepoId, setAddingRepoId] = useState<number | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const fetchProjects = useCallback(async (showRefreshToast = false) => {
+    try {
+      const response = await projectsApi.list();
+      setProjects(response.data);
+      if (showRefreshToast) {
+        toast.success('Projects refreshed');
+      }
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+      toast.error('Failed to load projects', getErrorMessage(error));
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [setProjects, toast]);
 
   useEffect(() => {
     if (mounted && !isAuthenticated) {
@@ -52,21 +76,15 @@ export default function Dashboard() {
       return;
     }
 
-    const fetchProjects = async () => {
-      try {
-        const response = await projectsApi.list();
-        setProjects(response.data);
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     if (mounted && isAuthenticated) {
       fetchProjects();
     }
-  }, [mounted, isAuthenticated, router, setProjects]);
+  }, [mounted, isAuthenticated, router, fetchProjects]);
+
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchProjects(true);
+  }, [fetchProjects]);
 
   // Polling for in-progress projects (cloning or indexing)
   const { updateProject } = useProjectsStore();
@@ -112,13 +130,15 @@ export default function Dashboard() {
     try {
       const response = await githubApi.listRepos();
       setRepos(response.data);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to fetch GitHub repos:', error);
-      setReposError(error.response?.data?.detail || 'Failed to fetch repositories');
+      const message = getErrorMessage(error);
+      setReposError(message);
+      toast.error('Failed to load repositories', message);
     } finally {
       setReposLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   const openModal = useCallback(() => {
     setIsModalOpen(true);
@@ -137,30 +157,36 @@ export default function Dashboard() {
     try {
       const response = await projectsApi.create(repo.id);
       addProject(response.data);
+      toast.success('Project added', `${repo.name} has been connected`);
       closeModal();
     } catch (error: any) {
       console.error('Failed to add project:', error);
-      if (error.response?.status === 409) {
-        setReposError('This repository is already connected.');
-      } else {
-        setReposError(error.response?.data?.detail || 'Failed to add project');
-      }
+      const message = error.code === 'RES_ALREADY_EXISTS' || error.status === 409
+        ? 'This repository is already connected.'
+        : getErrorMessage(error);
+      setReposError(message);
+      toast.error('Failed to add project', message);
     } finally {
       setAddingRepoId(null);
     }
-  }, [addProject, closeModal]);
+  }, [addProject, closeModal, toast]);
 
   const handleDeleteProject = useCallback(async (projectId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this project?')) return;
 
+    setDeletingProjectId(projectId);
     try {
       await projectsApi.delete(projectId);
       setProjects(projects.filter(p => p.id !== projectId));
+      toast.success('Project deleted');
     } catch (error) {
       console.error('Failed to delete project:', error);
+      toast.error('Failed to delete project', getErrorMessage(error));
+    } finally {
+      setDeletingProjectId(null);
     }
-  }, [projects, setProjects]);
+  }, [projects, setProjects, toast]);
 
   // Check if repo is already added
   const isRepoAdded = useCallback((repoId: number) => {
@@ -170,22 +196,7 @@ export default function Dashboard() {
   if (!mounted) return null;
 
   const getStatusBadge = (status: Project['status']) => {
-    const styles = {
-      pending: 'bg-yellow-500/10 text-yellow-500',
-      cloning: 'bg-purple-500/10 text-purple-500',
-      indexing: 'bg-blue-500/10 text-blue-500',
-      ready: 'bg-green-500/10 text-green-500',
-      error: 'bg-red-500/10 text-red-500',
-    };
-    const isInProgress = status === 'cloning' || status === 'indexing';
-    return (
-      <span className={`rounded-full px-2 py-1 text-xs font-medium ${styles[status]} flex items-center gap-1`}>
-        {isInProgress && (
-          <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        )}
-        {status}
-      </span>
-    );
+    return <IndexingBadge status={status} />;
   };
 
   const formatDate = (dateStr: string) => {
@@ -206,19 +217,32 @@ export default function Dashboard() {
             Welcome back, {user?.username}
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={openModal}
-            className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={handleRefresh}
+            loading={isRefreshing}
+            leftIcon={<RefreshCw className="h-4 w-4" />}
+            aria-label="Refresh projects"
           >
-            + Connect Repository
-          </button>
-          <button
+            <span className="sr-only sm:not-sr-only">Refresh</span>
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={openModal}
+            leftIcon={<Plus className="h-4 w-4" />}
+          >
+            Connect Repository
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
             onClick={logout}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-gray-700 bg-transparent px-4 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800"
           >
             Logout
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -227,8 +251,10 @@ export default function Dashboard() {
         <h2 className="text-xl font-semibold text-white">Your Projects</h2>
 
         {loading ? (
-          <div className="mt-6 flex justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonProjectCard key={i} />
+            ))}
           </div>
         ) : projects.length === 0 ? (
           <div className="mt-6 rounded-lg border-2 border-dashed border-gray-700 p-12 text-center">
@@ -296,23 +322,15 @@ export default function Dashboard() {
                     {getStatusBadge(project.status)}
                     <button
                       onClick={(e) => handleDeleteProject(project.id, e)}
-                      className="rounded p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-800 hover:text-red-500 group-hover:opacity-100"
+                      disabled={deletingProjectId === project.id}
+                      className="rounded p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-800 hover:text-red-500 group-hover:opacity-100 disabled:opacity-100 disabled:cursor-wait"
                       title="Delete project"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                      </svg>
+                      {deletingProjectId === project.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
                 </div>
