@@ -24,6 +24,8 @@ EXECUTION_PROMPT_CREATE = """You are an expert Laravel developer creating a new 
 ## File to Create
 {file_path}
 
+{project_context}
+
 ## Codebase Context
 {context}
 
@@ -61,6 +63,8 @@ EXECUTION_PROMPT_MODIFY = """You are an expert Laravel developer modifying an ex
 ```php
 {current_content}
 ```
+
+{project_context}
 
 ## Codebase Context
 {context}
@@ -167,6 +171,7 @@ class Executor:
         context: RetrievedContext,
         previous_results: list[ExecutionResult],
         current_file_content: Optional[str] = None,
+        project_context: str = "",
     ) -> ExecutionResult:
         """
         Execute a single plan step.
@@ -176,6 +181,7 @@ class Executor:
             context: Retrieved codebase context
             previous_results: Results from previous steps
             current_file_content: Current content of the file (for modify/delete)
+            project_context: Rich project context (stack, conventions, etc.)
 
         Returns:
             ExecutionResult with generated code
@@ -188,11 +194,11 @@ class Executor:
         try:
             if step.action == "create":
                 result = await self._execute_create(
-                    step, context, prev_results_str
+                    step, context, prev_results_str, project_context
                 )
             elif step.action == "modify":
                 result = await self._execute_modify(
-                    step, context, prev_results_str, current_file_content or ""
+                    step, context, prev_results_str, current_file_content or "", project_context
                 )
             elif step.action == "delete":
                 result = await self._execute_delete(
@@ -226,11 +232,13 @@ class Executor:
         step: PlanStep,
         context: RetrievedContext,
         previous_results: str,
+        project_context: str = "",
     ) -> ExecutionResult:
         """Execute a create action."""
         prompt = EXECUTION_PROMPT_CREATE.format(
             description=step.description,
             file_path=step.file,
+            project_context=project_context,
             context=context.to_prompt_string(),
             previous_results=previous_results,
         )
@@ -257,12 +265,14 @@ class Executor:
         context: RetrievedContext,
         previous_results: str,
         current_content: str,
+        project_context: str = "",
     ) -> ExecutionResult:
         """Execute a modify action."""
         prompt = EXECUTION_PROMPT_MODIFY.format(
             description=step.description,
             file_path=step.file,
             current_content=current_content,
+            project_context=project_context,
             context=context.to_prompt_string(),
             previous_results=previous_results,
         )

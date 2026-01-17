@@ -409,13 +409,13 @@ async def stream_question_response(
         # Create orchestrator for context retrieval
         orchestrator = Orchestrator(db=db)
 
-        # Get intent and context
+        # Get intent, context, and project context
         yield create_sse_event(EventType.INTENT_ANALYZED, {
             "message": "Analyzing your question...",
             "progress": 0.1,
         })
 
-        intent, context = await orchestrator.process_question(project_id, question)
+        intent, context, project_context = await orchestrator.process_question(project_id, question)
 
         yield create_sse_event(EventType.INTENT_ANALYZED, {
             "message": f"Identified as: {intent.task_type}",
@@ -429,19 +429,22 @@ async def stream_question_response(
             "chunks_count": len(context.chunks),
         })
 
-        # Build prompt for question answering
-        system_prompt = """You are an expert Laravel developer assistant.
-Answer the user's question based on the provided codebase context.
+        # Build prompt for question answering with rich project context
+        system_prompt = """You are an expert developer assistant with deep knowledge of this specific codebase.
+Answer the user's question based on the provided project information and codebase context.
 Be specific, reference actual code when relevant, and provide examples.
+Follow the project's conventions and patterns when suggesting solutions.
 If you're not sure about something, say so."""
 
         user_prompt = f"""## Question
 {question}
 
-## Codebase Context
+{project_context}
+
+## Relevant Code Context
 {context.to_prompt_string()}
 
-Please answer the question based on this codebase context."""
+Please answer the question based on this project and codebase context. Use the technology stack, conventions, and patterns specific to this project."""
 
         # Stream response from Claude
         claude = get_claude_service()
@@ -736,17 +739,22 @@ async def chat_sync(
         is_question = request.message.strip().endswith("?")
 
         if is_question:
-            # Get context and answer question
-            intent, context = await orchestrator.process_question(project_id, request.message)
+            # Get context, project context and answer question
+            intent, context, project_context = await orchestrator.process_question(project_id, request.message)
 
-            system_prompt = """You are an expert Laravel developer assistant.
-Answer the user's question based on the provided codebase context."""
+            system_prompt = """You are an expert developer assistant with deep knowledge of this specific codebase.
+Answer the user's question based on the provided project information and codebase context.
+Follow the project's conventions and patterns when suggesting solutions."""
 
             user_prompt = f"""## Question
 {request.message}
 
-## Codebase Context
-{context.to_prompt_string()}"""
+{project_context}
+
+## Relevant Code Context
+{context.to_prompt_string()}
+
+Please answer based on this project's specific technology stack, conventions, and patterns."""
 
             claude = get_claude_service()
             response_text = await claude.chat_async(

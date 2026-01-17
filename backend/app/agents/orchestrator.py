@@ -4,6 +4,7 @@ Orchestrator Agent.
 Coordinates all agents to process user requests from start to finish.
 Manages the workflow: analyze → retrieve → plan → execute → validate.
 """
+import json
 import logging
 from typing import Optional, Callable, Any
 from dataclasses import dataclass, field
@@ -166,17 +167,15 @@ class Orchestrator:
         result = ProcessResult(success=False, events=[])
 
         try:
-            # 1. Fetch project and build context
+            # 1. Fetch project and build rich context
             project = await self._get_project(project_id)
             if not project:
                 result.error = "Project not found"
                 return result
 
-            project_context = f"""
-Project: {project.repo_full_name}
-Laravel Version: {project.laravel_version or 'Unknown'}
-Indexed Files: {project.indexed_files_count}
-"""
+            # Build rich context from scan data (stack, health, ai_context)
+            project_context = self.build_project_context(project)
+            logger.info(f"[ORCHESTRATOR] Built project context ({len(project_context)} chars)")
 
             # 2. Analyze intent
             event = await self._emit_event(
@@ -236,7 +235,7 @@ Indexed Files: {project.indexed_files_count}
             )
             result.events.append(event)
 
-            plan = await self.planner.plan(user_input, intent, context)
+            plan = await self.planner.plan(user_input, intent, context, project_context)
             result.plan = plan
 
             event = await self._emit_event(
@@ -289,6 +288,7 @@ Indexed Files: {project.indexed_files_count}
                     context=context,
                     previous_results=execution_results,
                     current_file_content=current_content,
+                    project_context=project_context,
                 )
 
                 execution_results.append(exec_result)
@@ -443,34 +443,201 @@ Indexed Files: {project.indexed_files_count}
 
         return None
 
+    def build_project_context(self, project: Project) -> str:
+        """
+        Build rich project context from scan data for AI prompts.
+
+        This provides the AI with accurate information about the project's
+        technology stack, structure, patterns, and conventions to avoid
+        hallucinations and generate code that matches the codebase.
+
+        Args:
+            project: Project model with scan data
+
+        Returns:
+            Formatted string with project context
+        """
+        parts = []
+
+        # Basic info
+        parts.append(f"## Project: {project.repo_full_name}")
+        parts.append("")
+
+        # Technology Stack
+        if project.stack:
+            parts.append("### Technology Stack")
+            stack = project.stack
+
+            # Backend
+            backend = stack.get("backend", {})
+            if backend:
+                framework = backend.get("framework", "unknown")
+                version = backend.get("version", "")
+                php_version = backend.get("php_version", "")
+                parts.append(f"- **Backend Framework:** {framework} {version}".strip())
+                if php_version:
+                    parts.append(f"- **PHP Version:** {php_version}")
+
+            # Frontend
+            frontend = stack.get("frontend", {})
+            if frontend:
+                frontend_framework = frontend.get("framework", "")
+                frontend_version = frontend.get("version", "")
+                if frontend_framework:
+                    parts.append(f"- **Frontend Framework:** {frontend_framework} {frontend_version}".strip())
+
+            # Database
+            database = stack.get("database", {})
+            if database:
+                db_type = database.get("type", "")
+                if db_type:
+                    parts.append(f"- **Database:** {db_type}")
+
+            # Key packages
+            packages = stack.get("packages", [])
+            if packages:
+                parts.append(f"- **Key Packages:** {', '.join(packages[:10])}")
+
+            parts.append("")
+
+        # File Statistics
+        if project.file_stats:
+            parts.append("### Codebase Statistics")
+            stats = project.file_stats
+            parts.append(f"- **Total Files:** {stats.get('total_files', 0)}")
+            parts.append(f"- **Total Lines:** {stats.get('total_lines', 0):,}")
+
+            by_type = stats.get("by_type", {})
+            if by_type:
+                type_summary = ", ".join([f"{k}: {v}" for k, v in list(by_type.items())[:5]])
+                parts.append(f"- **By Type:** {type_summary}")
+
+            parts.append("")
+
+        # Project Structure
+        if project.structure:
+            parts.append("### Project Structure")
+            structure = project.structure
+
+            # Key directories
+            directories = structure.get("directories", [])
+            if directories:
+                parts.append(f"- **Key Directories:** {', '.join(directories[:10])}")
+
+            # Patterns detected
+            patterns = structure.get("patterns_detected", [])
+            if patterns:
+                parts.append(f"- **Patterns Detected:** {', '.join(patterns)}")
+
+            parts.append("")
+
+        # Health Score
+        if project.health_score is not None:
+            parts.append(f"### Health Score: {project.health_score:.0f}/100")
+
+            if project.health_check:
+                health = project.health_check
+                categories = health.get("categories", {})
+                if categories:
+                    parts.append("Category Scores:")
+                    for cat, data in list(categories.items())[:6]:
+                        score = data.get("score", 0) if isinstance(data, dict) else data
+                        parts.append(f"  - {cat}: {score}/100")
+
+                # Critical issues
+                critical = health.get("critical_issues", 0)
+                warnings = health.get("warnings", 0)
+                if critical or warnings:
+                    parts.append(f"- **Issues:** {critical} critical, {warnings} warnings")
+
+            parts.append("")
+
+        # AI Context (conventions, patterns)
+        if project.ai_context:
+            ai_ctx = project.ai_context
+
+            # CLAUDE.md content (summary rules for AI)
+            claude_md = ai_ctx.get("claude_md_content", "")
+            if claude_md:
+                parts.append("### Project Conventions (CLAUDE.md)")
+                # Include first ~1500 chars of CLAUDE.md
+                if len(claude_md) > 1500:
+                    parts.append(claude_md[:1500] + "...")
+                else:
+                    parts.append(claude_md)
+                parts.append("")
+
+            # Coding conventions
+            conventions = ai_ctx.get("conventions", {})
+            if conventions:
+                php_conv = conventions.get("php", {})
+                vue_conv = conventions.get("vue", {})
+
+                if php_conv or vue_conv:
+                    parts.append("### Coding Conventions")
+
+                    if php_conv:
+                        naming = php_conv.get("naming_style", "")
+                        if naming:
+                            parts.append(f"- **PHP Naming:** {naming}")
+                        uses_traits = php_conv.get("uses_traits", False)
+                        if uses_traits:
+                            parts.append("- **Uses Traits:** Yes")
+
+                    if vue_conv:
+                        vue_version = vue_conv.get("version", "")
+                        api_style = vue_conv.get("api_style", "")
+                        if vue_version:
+                            parts.append(f"- **Vue Version:** {vue_version}")
+                        if api_style:
+                            parts.append(f"- **Vue API Style:** {api_style}")
+
+                    parts.append("")
+
+            # Key patterns
+            patterns = ai_ctx.get("key_patterns", [])
+            if patterns:
+                parts.append("### Architecture Patterns")
+                for pattern in patterns[:5]:
+                    parts.append(f"- {pattern}")
+                parts.append("")
+
+            # Domain knowledge (models, routes)
+            domain = ai_ctx.get("domain_knowledge", {})
+            if domain:
+                models = domain.get("models", [])
+                if models:
+                    parts.append(f"### Database Models")
+                    parts.append(f"Available models: {', '.join(models[:15])}")
+                    parts.append("")
+
+        return "\n".join(parts)
+
     async def process_question(
         self,
         project_id: str,
         question: str,
-    ) -> tuple[Intent, RetrievedContext]:
+    ) -> tuple[Intent, RetrievedContext, str]:
         """
         Process a question (without code generation).
 
-        Returns intent and context for the chat endpoint to use.
+        Returns intent, context, and project context for the chat endpoint to use.
 
         Args:
             project_id: The project UUID
             question: User's question
 
         Returns:
-            Tuple of (Intent, RetrievedContext)
+            Tuple of (Intent, RetrievedContext, project_context_string)
         """
         logger.info(f"[ORCHESTRATOR] Processing question for project={project_id}")
 
-        # Get project context
+        # Get project and build rich context
         project = await self._get_project(project_id)
         project_context = ""
         if project:
-            project_context = f"""
-Project: {project.repo_full_name}
-Laravel Version: {project.laravel_version or 'Unknown'}
-Indexed Files: {project.indexed_files_count}
-"""
+            project_context = self.build_project_context(project)
+            logger.info(f"[ORCHESTRATOR] Built question context ({len(project_context)} chars)")
 
         # Analyze intent
         intent = await self.intent_analyzer.analyze(question, project_context)
@@ -478,4 +645,4 @@ Indexed Files: {project.indexed_files_count}
         # Retrieve context
         context = await self.context_retriever.retrieve(project_id, intent)
 
-        return intent, context
+        return intent, context, project_context

@@ -26,6 +26,8 @@ PLANNING_PROMPT = """You are an expert Laravel developer creating an implementat
 - Domains Affected: {domains}
 - Requires Migration: {requires_migration}
 
+{project_context}
+
 ## Relevant Codebase Context
 {context}
 
@@ -137,6 +139,7 @@ class Planner:
         user_input: str,
         intent: Intent,
         context: RetrievedContext,
+        project_context: str = "",
     ) -> Plan:
         """
         Create an execution plan.
@@ -145,6 +148,7 @@ class Planner:
             user_input: Original user request
             intent: Analyzed intent
             context: Retrieved codebase context
+            project_context: Rich project context (stack, conventions, etc.)
 
         Returns:
             Plan with ordered steps
@@ -158,6 +162,7 @@ class Planner:
             scope=intent.scope,
             domains=", ".join(intent.domains_affected) or "general",
             requires_migration="Yes" if intent.requires_migration else "No",
+            project_context=project_context,
             context=context.to_prompt_string(),
         )
 
