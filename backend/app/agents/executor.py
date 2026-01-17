@@ -173,6 +173,12 @@ Make targeted, minimal changes while ensuring the modification is complete and p
 </previous_steps>
 
 <modification_guidelines>
+**CRITICAL: Preserve Existing Code**
+- You MUST keep ALL existing code in the file
+- Your task is to ADD to or MODIFY existing code, NOT to replace the entire file
+- If the current file has 100 lines and you add 10 lines, the result should have ~110 lines
+- NEVER delete existing functionality unless explicitly asked to
+
 **Minimal Change Principle:**
 - Only modify what's necessary for the task
 - Preserve ALL existing code that isn't directly related
@@ -184,6 +190,7 @@ Make targeted, minimal changes while ensuring the modification is complete and p
 - Add new use statements in alphabetical order with existing ones
 - Add new properties near related properties
 - Match docblock style exactly with existing methods
+- For route files: ADD new routes, don't replace existing routes
 
 **When Changing Code:**
 - Preserve indentation and formatting style
@@ -194,8 +201,10 @@ Make targeted, minimal changes while ensuring the modification is complete and p
 **Diff Awareness:**
 Think about how your changes will appear in a diff:
 - Minimize lines changed
+- The diff should show mostly ADDITIONS ('+' lines), not removals
 - Keep additions grouped logically
 - Avoid reformatting unchanged code
+- If the diff shows the entire file being replaced, you're doing it WRONG
 </modification_guidelines>
 
 <example>
@@ -702,6 +711,18 @@ class Executor:
         """
         logger.info(f"[EXECUTOR] Fixing execution for {result.file}")
 
+        # Include original content if this was a modify action
+        original_section = ""
+        if result.action == "modify" and result.original_content:
+            original_section = f"""
+<original_file_content>
+This is the ORIGINAL content of the file that should be PRESERVED and ADDED TO:
+```php
+{result.original_content}
+```
+</original_file_content>
+"""
+
         prompt = f"""<role>
 You are an expert Laravel developer fixing specific code issues. Focus ONLY on the identified issues - do not refactor or change anything else.
 </role>
@@ -710,12 +731,12 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 <file>{result.file}</file>
 <action>{result.action}</action>
 </context>
-
-<current_code>
+{original_section}
+<generated_code_with_issues>
 ```php
 {result.content}
 ```
-</current_code>
+</generated_code_with_issues>
 
 <issues_to_fix>
 {chr(10).join(f"- {issue}" for issue in issues)}
@@ -726,6 +747,11 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 </codebase_reference>
 
 <fix_guidelines>
+**CRITICAL: Preserve All Existing Code**
+- Keep ALL existing functionality intact
+- Only make the minimal changes needed to fix the identified issues
+- The output should contain the ENTIRE file, not just the fixes
+
 **For each issue:**
 1. Identify the exact location of the problem
 2. Determine the minimal fix needed
@@ -733,17 +759,23 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 4. Verify the fix doesn't break anything else
 
 **Common Laravel Fixes:**
-- Missing use statement → Add at top with other imports
+- Missing use statement → Add at top with other imports (keep existing imports!)
 - Missing return type → Add type hint to method signature
 - Missing docblock → Add matching existing style
 - Syntax error → Fix the specific syntax issue
 - Missing validation → Add to Form Request or inline
+- File content replaced instead of modified → Restore missing content and ADD the new code
+
+**For "Route completely replaces existing content" errors:**
+- The fix is to KEEP all existing routes AND add the new route
+- Look at the original routes/api.php content and ensure all existing routes are preserved
 
 **Do NOT:**
 - Refactor code that wasn't mentioned in issues
 - Change code style or formatting
 - Add features not requested
 - Remove functionality that works
+- Delete existing code unless explicitly requested
 </fix_guidelines>
 
 <output_format>

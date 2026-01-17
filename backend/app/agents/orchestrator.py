@@ -353,28 +353,81 @@ class Orchestrator:
                 )
                 result.events.append(event)
 
-                # Get error messages
-                issues = [i.message for i in validation.errors]
+                # Get all error messages for context
+                all_issues = [i.message for i in validation.errors]
+
+                # Normalize file paths for comparison (handle different formats)
+                def normalize_path(path: str) -> str:
+                    """Normalize file path for comparison."""
+                    if not path:
+                        return ""
+                    # Remove leading/trailing whitespace
+                    path = path.strip()
+                    # Normalize slashes
+                    path = path.replace("\\", "/")
+                    # Remove leading ./
+                    if path.startswith("./"):
+                        path = path[2:]
+                    # Lowercase for comparison
+                    return path.lower()
+
+                # Create a map of normalized paths to original paths
+                exec_result_paths = {
+                    normalize_path(r.file): i
+                    for i, r in enumerate(execution_results)
+                }
+
+                # Track which files need fixing
+                files_to_fix = set()
 
                 # Try to fix each problematic result
-                for i, exec_result in enumerate(execution_results):
+                for issue in validation.errors:
+                    issue_file_norm = normalize_path(issue.file)
+
+                    # Find matching execution result
+                    if issue_file_norm in exec_result_paths:
+                        files_to_fix.add(exec_result_paths[issue_file_norm])
+                    elif issue.file:
+                        # Try partial matching (e.g., "api.php" matches "routes/api.php")
+                        for norm_path, idx in exec_result_paths.items():
+                            if issue_file_norm in norm_path or norm_path.endswith(issue_file_norm):
+                                files_to_fix.add(idx)
+                                break
+
+                # If no files matched but we have errors, try to fix all execution results
+                if not files_to_fix and validation.errors:
+                    logger.warning("[ORCHESTRATOR] No specific files matched errors, attempting to fix all")
+                    files_to_fix = set(range(len(execution_results)))
+
+                # Fix each identified file
+                for idx in files_to_fix:
+                    exec_result = execution_results[idx]
                     if not exec_result.success:
                         continue
 
-                    # Check if this file has issues
+                    # Get file-specific issues plus general issues (without a file)
+                    exec_file_norm = normalize_path(exec_result.file)
                     file_issues = [
                         issue.message
                         for issue in validation.errors
-                        if issue.file == exec_result.file
+                        if normalize_path(issue.file) == exec_file_norm
+                        or not issue.file  # Include issues without a specific file
+                        or normalize_path(issue.file) in exec_file_norm
+                        or exec_file_norm.endswith(normalize_path(issue.file))
                     ]
 
+                    # If no specific issues, provide all error messages as context
+                    if not file_issues:
+                        file_issues = all_issues
+
                     if file_issues:
+                        logger.info(f"[ORCHESTRATOR] Fixing {exec_result.file} with {len(file_issues)} issues")
                         fixed = await self.executor.fix_execution(
                             result=exec_result,
                             issues=file_issues,
                             context=context,
                         )
-                        execution_results[i] = fixed
+                        execution_results[idx] = fixed
 
                 result.execution_results = execution_results
 
@@ -386,6 +439,8 @@ class Orchestrator:
                     context=context,
                 )
                 result.validation = validation
+
+                logger.info(f"[ORCHESTRATOR] Retry {retry_count}: approved={validation.approved}, score={validation.score}")
 
             # 9. Final status
             if validation.approved:
