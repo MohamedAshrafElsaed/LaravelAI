@@ -165,7 +165,7 @@ async def debug_project(project_id: str):
         print(f"   Using provider: {provider}")
 
         test_query = "get user information api"
-        embedding = await embedding_service.embed_text(test_query)
+        embedding = await embedding_service.embed_query(test_query)
 
         if embedding:
             print(f"   ✓ Embedding generated successfully")
