@@ -459,157 +459,212 @@ class Orchestrator:
         """
         parts = []
 
+        # Helper to safely get dict values
+        def safe_get(obj, key, default=None):
+            """Safely get a value from dict, handling str/None cases."""
+            if obj is None:
+                return default
+            if isinstance(obj, str):
+                # Try to parse as JSON if it's a string
+                try:
+                    obj = json.loads(obj)
+                except (json.JSONDecodeError, TypeError):
+                    return default
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return default
+
         # Basic info
         parts.append(f"## Project: {project.repo_full_name}")
         parts.append("")
 
         # Technology Stack
-        if project.stack:
-            parts.append("### Technology Stack")
-            stack = project.stack
+        stack = project.stack
+        if stack:
+            # Handle if stack is a string (JSON)
+            if isinstance(stack, str):
+                try:
+                    stack = json.loads(stack)
+                except (json.JSONDecodeError, TypeError):
+                    stack = {}
 
-            # Backend
-            backend = stack.get("backend", {})
-            if backend:
-                framework = backend.get("framework", "unknown")
-                version = backend.get("version", "")
-                php_version = backend.get("php_version", "")
-                parts.append(f"- **Backend Framework:** {framework} {version}".strip())
-                if php_version:
-                    parts.append(f"- **PHP Version:** {php_version}")
+            if isinstance(stack, dict):
+                parts.append("### Technology Stack")
 
-            # Frontend
-            frontend = stack.get("frontend", {})
-            if frontend:
-                frontend_framework = frontend.get("framework", "")
-                frontend_version = frontend.get("version", "")
-                if frontend_framework:
-                    parts.append(f"- **Frontend Framework:** {frontend_framework} {frontend_version}".strip())
+                # Backend
+                backend = safe_get(stack, "backend", {})
+                if isinstance(backend, dict) and backend:
+                    framework = safe_get(backend, "framework", "unknown")
+                    version = safe_get(backend, "version", "")
+                    php_version = safe_get(backend, "php_version", "")
+                    parts.append(f"- **Backend Framework:** {framework} {version}".strip())
+                    if php_version:
+                        parts.append(f"- **PHP Version:** {php_version}")
 
-            # Database
-            database = stack.get("database", {})
-            if database:
-                db_type = database.get("type", "")
-                if db_type:
-                    parts.append(f"- **Database:** {db_type}")
+                # Frontend
+                frontend = safe_get(stack, "frontend", {})
+                if isinstance(frontend, dict) and frontend:
+                    frontend_framework = safe_get(frontend, "framework", "")
+                    frontend_version = safe_get(frontend, "version", "")
+                    if frontend_framework:
+                        parts.append(f"- **Frontend Framework:** {frontend_framework} {frontend_version}".strip())
 
-            # Key packages
-            packages = stack.get("packages", [])
-            if packages:
-                parts.append(f"- **Key Packages:** {', '.join(packages[:10])}")
+                # Database
+                database = safe_get(stack, "database", {})
+                if isinstance(database, dict) and database:
+                    db_type = safe_get(database, "type", "")
+                    if db_type:
+                        parts.append(f"- **Database:** {db_type}")
 
-            parts.append("")
+                # Key packages
+                packages = safe_get(stack, "packages", [])
+                if isinstance(packages, list) and packages:
+                    parts.append(f"- **Key Packages:** {', '.join(str(p) for p in packages[:10])}")
+
+                parts.append("")
 
         # File Statistics
-        if project.file_stats:
-            parts.append("### Codebase Statistics")
-            stats = project.file_stats
-            parts.append(f"- **Total Files:** {stats.get('total_files', 0)}")
-            parts.append(f"- **Total Lines:** {stats.get('total_lines', 0):,}")
+        file_stats = project.file_stats
+        if file_stats:
+            if isinstance(file_stats, str):
+                try:
+                    file_stats = json.loads(file_stats)
+                except (json.JSONDecodeError, TypeError):
+                    file_stats = {}
 
-            by_type = stats.get("by_type", {})
-            if by_type:
-                type_summary = ", ".join([f"{k}: {v}" for k, v in list(by_type.items())[:5]])
-                parts.append(f"- **By Type:** {type_summary}")
+            if isinstance(file_stats, dict):
+                parts.append("### Codebase Statistics")
+                total_files = safe_get(file_stats, 'total_files', 0)
+                total_lines = safe_get(file_stats, 'total_lines', 0)
+                parts.append(f"- **Total Files:** {total_files}")
+                parts.append(f"- **Total Lines:** {total_lines:,}" if isinstance(total_lines, int) else f"- **Total Lines:** {total_lines}")
 
-            parts.append("")
+                by_type = safe_get(file_stats, "by_type", {})
+                if isinstance(by_type, dict) and by_type:
+                    type_summary = ", ".join([f"{k}: {v}" for k, v in list(by_type.items())[:5]])
+                    parts.append(f"- **By Type:** {type_summary}")
+
+                parts.append("")
 
         # Project Structure
-        if project.structure:
-            parts.append("### Project Structure")
-            structure = project.structure
+        structure = project.structure
+        if structure:
+            if isinstance(structure, str):
+                try:
+                    structure = json.loads(structure)
+                except (json.JSONDecodeError, TypeError):
+                    structure = {}
 
-            # Key directories
-            directories = structure.get("directories", [])
-            if directories:
-                parts.append(f"- **Key Directories:** {', '.join(directories[:10])}")
+            if isinstance(structure, dict):
+                parts.append("### Project Structure")
 
-            # Patterns detected
-            patterns = structure.get("patterns_detected", [])
-            if patterns:
-                parts.append(f"- **Patterns Detected:** {', '.join(patterns)}")
+                # Key directories
+                directories = safe_get(structure, "directories", [])
+                if isinstance(directories, list) and directories:
+                    parts.append(f"- **Key Directories:** {', '.join(str(d) for d in directories[:10])}")
 
-            parts.append("")
+                # Patterns detected
+                patterns = safe_get(structure, "patterns_detected", [])
+                if isinstance(patterns, list) and patterns:
+                    parts.append(f"- **Patterns Detected:** {', '.join(str(p) for p in patterns)}")
+
+                parts.append("")
 
         # Health Score
         if project.health_score is not None:
-            parts.append(f"### Health Score: {project.health_score:.0f}/100")
+            try:
+                parts.append(f"### Health Score: {float(project.health_score):.0f}/100")
+            except (ValueError, TypeError):
+                parts.append(f"### Health Score: {project.health_score}/100")
 
-            if project.health_check:
-                health = project.health_check
-                categories = health.get("categories", {})
-                if categories:
-                    parts.append("Category Scores:")
-                    for cat, data in list(categories.items())[:6]:
-                        score = data.get("score", 0) if isinstance(data, dict) else data
-                        parts.append(f"  - {cat}: {score}/100")
+            health_check = project.health_check
+            if health_check:
+                if isinstance(health_check, str):
+                    try:
+                        health_check = json.loads(health_check)
+                    except (json.JSONDecodeError, TypeError):
+                        health_check = {}
 
-                # Critical issues
-                critical = health.get("critical_issues", 0)
-                warnings = health.get("warnings", 0)
-                if critical or warnings:
-                    parts.append(f"- **Issues:** {critical} critical, {warnings} warnings")
+                if isinstance(health_check, dict):
+                    categories = safe_get(health_check, "categories", {})
+                    if isinstance(categories, dict) and categories:
+                        parts.append("Category Scores:")
+                        for cat, data in list(categories.items())[:6]:
+                            score = safe_get(data, "score", 0) if isinstance(data, dict) else data
+                            parts.append(f"  - {cat}: {score}/100")
+
+                    # Critical issues
+                    critical = safe_get(health_check, "critical_issues", 0)
+                    warnings = safe_get(health_check, "warnings", 0)
+                    if critical or warnings:
+                        parts.append(f"- **Issues:** {critical} critical, {warnings} warnings")
 
             parts.append("")
 
         # AI Context (conventions, patterns)
-        if project.ai_context:
-            ai_ctx = project.ai_context
+        ai_context = project.ai_context
+        if ai_context:
+            if isinstance(ai_context, str):
+                try:
+                    ai_context = json.loads(ai_context)
+                except (json.JSONDecodeError, TypeError):
+                    ai_context = {}
 
-            # CLAUDE.md content (summary rules for AI)
-            claude_md = ai_ctx.get("claude_md_content", "")
-            if claude_md:
-                parts.append("### Project Conventions (CLAUDE.md)")
-                # Include first ~1500 chars of CLAUDE.md
-                if len(claude_md) > 1500:
-                    parts.append(claude_md[:1500] + "...")
-                else:
-                    parts.append(claude_md)
-                parts.append("")
-
-            # Coding conventions
-            conventions = ai_ctx.get("conventions", {})
-            if conventions:
-                php_conv = conventions.get("php", {})
-                vue_conv = conventions.get("vue", {})
-
-                if php_conv or vue_conv:
-                    parts.append("### Coding Conventions")
-
-                    if php_conv:
-                        naming = php_conv.get("naming_style", "")
-                        if naming:
-                            parts.append(f"- **PHP Naming:** {naming}")
-                        uses_traits = php_conv.get("uses_traits", False)
-                        if uses_traits:
-                            parts.append("- **Uses Traits:** Yes")
-
-                    if vue_conv:
-                        vue_version = vue_conv.get("version", "")
-                        api_style = vue_conv.get("api_style", "")
-                        if vue_version:
-                            parts.append(f"- **Vue Version:** {vue_version}")
-                        if api_style:
-                            parts.append(f"- **Vue API Style:** {api_style}")
-
+            if isinstance(ai_context, dict):
+                # CLAUDE.md content (summary rules for AI)
+                claude_md = safe_get(ai_context, "claude_md_content", "")
+                if claude_md and isinstance(claude_md, str):
+                    parts.append("### Project Conventions (CLAUDE.md)")
+                    # Include first ~1500 chars of CLAUDE.md
+                    if len(claude_md) > 1500:
+                        parts.append(claude_md[:1500] + "...")
+                    else:
+                        parts.append(claude_md)
                     parts.append("")
 
-            # Key patterns
-            patterns = ai_ctx.get("key_patterns", [])
-            if patterns:
-                parts.append("### Architecture Patterns")
-                for pattern in patterns[:5]:
-                    parts.append(f"- {pattern}")
-                parts.append("")
+                # Coding conventions
+                conventions = safe_get(ai_context, "conventions", {})
+                if isinstance(conventions, dict) and conventions:
+                    php_conv = safe_get(conventions, "php", {})
+                    vue_conv = safe_get(conventions, "vue", {})
 
-            # Domain knowledge (models, routes)
-            domain = ai_ctx.get("domain_knowledge", {})
-            if domain:
-                models = domain.get("models", [])
-                if models:
-                    parts.append(f"### Database Models")
-                    parts.append(f"Available models: {', '.join(models[:15])}")
+                    if (isinstance(php_conv, dict) and php_conv) or (isinstance(vue_conv, dict) and vue_conv):
+                        parts.append("### Coding Conventions")
+
+                        if isinstance(php_conv, dict) and php_conv:
+                            naming = safe_get(php_conv, "naming_style", "")
+                            if naming:
+                                parts.append(f"- **PHP Naming:** {naming}")
+                            uses_traits = safe_get(php_conv, "uses_traits", False)
+                            if uses_traits:
+                                parts.append("- **Uses Traits:** Yes")
+
+                        if isinstance(vue_conv, dict) and vue_conv:
+                            vue_version = safe_get(vue_conv, "version", "")
+                            api_style = safe_get(vue_conv, "api_style", "")
+                            if vue_version:
+                                parts.append(f"- **Vue Version:** {vue_version}")
+                            if api_style:
+                                parts.append(f"- **Vue API Style:** {api_style}")
+
+                        parts.append("")
+
+                # Key patterns
+                patterns = safe_get(ai_context, "key_patterns", [])
+                if isinstance(patterns, list) and patterns:
+                    parts.append("### Architecture Patterns")
+                    for pattern in patterns[:5]:
+                        parts.append(f"- {pattern}")
                     parts.append("")
+
+                # Domain knowledge (models, routes)
+                domain = safe_get(ai_context, "domain_knowledge", {})
+                if isinstance(domain, dict) and domain:
+                    models = safe_get(domain, "models", [])
+                    if isinstance(models, list) and models:
+                        parts.append(f"### Database Models")
+                        parts.append(f"Available models: {', '.join(str(m) for m in models[:15])}")
+                        parts.append("")
 
         return "\n".join(parts)
 
