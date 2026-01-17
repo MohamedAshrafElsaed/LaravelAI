@@ -6,6 +6,7 @@ Uses Claude Sonnet for complex reasoning about implementation steps.
 """
 import json
 import logging
+import re
 from typing import Optional
 from dataclasses import dataclass, field, asdict
 
@@ -14,6 +15,58 @@ from app.agents.context_retriever import RetrievedContext
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
+
+
+def extract_json(text: str) -> Optional[dict]:
+    """
+    Extract JSON object from text that may contain markdown or other content.
+
+    Handles various formats:
+    - Pure JSON
+    - JSON in ```json code blocks
+    - JSON in ``` code blocks
+    - JSON surrounded by text
+    """
+    if not text or not text.strip():
+        return None
+
+    text = text.strip()
+
+    # Try direct parsing first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract from markdown code block
+    code_block_patterns = [
+        r'```json\s*\n(.*?)\n```',  # ```json ... ```
+        r'```\s*\n(.*?)\n```',       # ``` ... ```
+        r'```json(.*?)```',           # ```json...``` (no newlines)
+        r'```(.*?)```',               # ```...``` (no newlines)
+    ]
+
+    for pattern in code_block_patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                continue
+
+    # Try to find JSON object by looking for { ... }
+    # Find the first { and last }
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        json_candidate = text[first_brace:last_brace + 1]
+        try:
+            return json.loads(json_candidate)
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 
 def safe_format(template: str, **kwargs) -> str:
@@ -322,34 +375,42 @@ class Planner:
                 request_type="planning",
             )
 
-            # Parse JSON response
-            response_text = response.strip()
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
+            # Log raw response for debugging
+            logger.info(f"[PLANNER] Received response ({len(response) if response else 0} chars)")
+            if not response:
+                logger.error("[PLANNER] Empty response from Claude")
+                return Plan(
+                    summary="Failed to create plan - empty response from AI",
+                    steps=[],
+                )
 
-            plan_data = json.loads(response_text)
+            # Extract JSON from response (handles various formats)
+            plan_data = extract_json(response)
+
+            if not plan_data:
+                logger.error(f"[PLANNER] Could not extract JSON from response")
+                logger.error(f"[PLANNER] Raw response (first 500 chars): {response[:500]}")
+                return Plan(
+                    summary="Failed to create plan - could not parse response",
+                    steps=[],
+                )
+
             plan = Plan.from_dict(plan_data)
 
             logger.info(f"[PLANNER] Plan created: {plan.summary}")
             logger.info(f"[PLANNER] Steps: {len(plan.steps)}")
             for step in plan.steps:
-                logger.debug(f"[PLANNER]   {step.order}. [{step.action}] {step.file}")
+                logger.info(f"[PLANNER]   {step.order}. [{step.action}] {step.file}")
 
             return plan
 
-        except json.JSONDecodeError as e:
-            logger.error(f"[PLANNER] Failed to parse plan JSON: {e}")
-            logger.debug(f"[PLANNER] Raw response: {response}")
-            # Return empty plan
-            return Plan(
-                summary="Failed to create plan - invalid response format",
-                steps=[],
-            )
-
         except Exception as e:
             logger.error(f"[PLANNER] Planning failed: {e}")
-            raise
+            logger.exception("[PLANNER] Full traceback:")
+            return Plan(
+                summary=f"Failed to create plan - {str(e)}",
+                steps=[],
+            )
 
     async def refine_plan(
         self,
@@ -407,12 +468,17 @@ Respond ONLY with the JSON object."""
                 request_type="planning",
             )
 
-            response_text = response.strip()
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
+            if not response:
+                logger.error("[PLANNER] Empty response when refining plan")
+                return plan
 
-            plan_data = json.loads(response_text)
+            plan_data = extract_json(response)
+
+            if not plan_data:
+                logger.error(f"[PLANNER] Could not extract JSON when refining plan")
+                logger.error(f"[PLANNER] Raw response (first 500 chars): {response[:500]}")
+                return plan
+
             refined_plan = Plan.from_dict(plan_data)
 
             logger.info(f"[PLANNER] Plan refined: {refined_plan.summary}")

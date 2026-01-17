@@ -170,38 +170,69 @@ class ContextRetriever:
         seen_files = set()
 
         # 1. Search vector DB with each query
+        if not intent.search_queries:
+            logger.warning("[CONTEXT_RETRIEVER] No search queries provided in intent")
+
         for query in intent.search_queries:
             if used_tokens >= token_budget:
                 break
 
             try:
+                logger.info(f"[CONTEXT_RETRIEVER] Generating embedding for query: '{query}'")
                 # Generate embedding for query
                 query_embedding = await self.embedding_service.embed_text(query)
 
-                # Search vector store
-                results = await self.vector_store.search(
+                if not query_embedding:
+                    logger.error(f"[CONTEXT_RETRIEVER] Failed to generate embedding for query '{query}'")
+                    continue
+
+                logger.info(f"[CONTEXT_RETRIEVER] Searching vector store with embedding ({len(query_embedding)} dims)")
+
+                # Search vector store with lower threshold first
+                # Note: VectorStore.search is synchronous, uses query_embedding parameter
+                results = self.vector_store.search(
                     project_id=project_id,
-                    query_vector=query_embedding,
+                    query_embedding=query_embedding,  # Correct parameter name
                     limit=10,
-                    score_threshold=0.5,
+                    score_threshold=0.3,  # Lower threshold to get more results
                 )
 
                 logger.info(f"[CONTEXT_RETRIEVER] Query '{query}' returned {len(results)} results")
 
+                # If no results, try with even lower threshold
+                if not results:
+                    logger.info(f"[CONTEXT_RETRIEVER] Retrying with lower threshold (0.1)")
+                    results = self.vector_store.search(
+                        project_id=project_id,
+                        query_embedding=query_embedding,
+                        limit=10,
+                        score_threshold=0.1,
+                    )
+                    logger.info(f"[CONTEXT_RETRIEVER] Retry returned {len(results)} results")
+
                 for result in results:
-                    # Defensive check - ensure result is a dict
-                    if not isinstance(result, dict):
-                        logger.warning(f"[CONTEXT_RETRIEVER] Skipping non-dict result: {type(result)}")
+                    # Handle SearchResult objects (convert to dict if needed)
+                    if hasattr(result, 'to_dict'):
+                        result_data = result.to_dict()
+                    elif isinstance(result, dict):
+                        result_data = result
+                    else:
+                        logger.warning(f"[CONTEXT_RETRIEVER] Skipping unknown result type: {type(result)}")
                         continue
 
+                    # Extract metadata - handle nested structure
+                    metadata = result_data.get("metadata", {})
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+
                     chunk = CodeChunk(
-                        file_path=result.get("file_path", "unknown"),
-                        content=result.get("content", ""),
-                        chunk_type=result.get("chunk_type", "code"),
-                        start_line=result.get("start_line", 0),
-                        end_line=result.get("end_line", 0),
-                        score=result.get("score", 0.0),
-                        metadata=result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {},
+                        file_path=result_data.get("file_path", "unknown"),
+                        content=result_data.get("content", ""),
+                        chunk_type=result_data.get("chunk_type", "code"),
+                        start_line=metadata.get("line_start", 0),
+                        end_line=metadata.get("line_end", 0),
+                        score=result_data.get("score", 0.0),
+                        metadata=metadata,
                     )
 
                     # Check token budget
@@ -255,7 +286,51 @@ class ContextRetriever:
         context.total_tokens = used_tokens
         logger.info(f"[CONTEXT_RETRIEVER] Retrieved {len(context.chunks)} chunks, {context.total_tokens} estimated tokens")
 
+        # Fallback: If no chunks found, try to get basic project structure
+        if not context.chunks:
+            logger.warning("[CONTEXT_RETRIEVER] No chunks retrieved, attempting fallback")
+            await self._add_fallback_context(project_id, context, token_budget)
+
         return context
+
+    async def _add_fallback_context(
+        self,
+        project_id: str,
+        context: RetrievedContext,
+        token_budget: int,
+    ) -> None:
+        """Add fallback context when vector search returns nothing."""
+        # Try to get some basic files from the database
+        fallback_files = [
+            "routes/web.php",
+            "routes/api.php",
+            "app/Models/User.php",
+            "app/Http/Controllers/Controller.php",
+            "config/app.php",
+        ]
+
+        used_tokens = 0
+        for file_path in fallback_files:
+            if used_tokens >= token_budget // 4:  # Use max 25% of budget for fallback
+                break
+
+            try:
+                content = await self._get_file_content(project_id, file_path)
+                if content:
+                    estimated = len(content) // CHARS_PER_TOKEN
+                    if used_tokens + estimated <= token_budget // 4:
+                        context.chunks.append(CodeChunk(
+                            file_path=file_path,
+                            content=content[:5000],  # Truncate long files
+                            chunk_type="fallback",
+                            start_line=1,
+                            end_line=content.count("\n") + 1,
+                            score=0.3,
+                        ))
+                        used_tokens += estimated
+                        logger.info(f"[CONTEXT_RETRIEVER] Added fallback file: {file_path}")
+            except Exception as e:
+                logger.debug(f"[CONTEXT_RETRIEVER] Fallback file not found: {file_path}")
 
     async def _expand_related_files(
         self,
