@@ -108,33 +108,9 @@ class ClaudeService:
         status: str = "success",
         error_message: Optional[str] = None,
     ) -> None:
-        """Track API usage if tracking is enabled."""
-        # Always log to operations logger
-        ops_logger = _get_ops_logger()
-        if ops_logger:
-            cost = self._calculate_cost(model, input_tokens, output_tokens)
-            ops_logger.log_api_call(
-                model=model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost=cost,
-                duration_ms=latency_ms,
-                request_type=request_type,
-                user_id=self.user_id,
-                project_id=self.project_id,
-            )
-
-            if status == "error" and error_message:
-                from app.services.ai_operations_logger import OperationType
-                ops_logger.log(
-                    operation_type=OperationType.API_ERROR,
-                    message=f"API call failed: {error_message}",
-                    model=model,
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    success=False,
-                    error=error_message,
-                )
+        """Track API usage to UsageTracker database (not ops_logger - that's done in chat_async)."""
+        # Note: ops_logger logging is now done directly in chat_async/stream methods
+        # with detailed cache info. This method only handles UsageTracker database logging.
 
         if not self._should_track():
             return
