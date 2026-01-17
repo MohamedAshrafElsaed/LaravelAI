@@ -165,6 +165,85 @@ async def get_or_create_conversation(
     return conversation
 
 
+async def get_conversation_history(
+    db: AsyncSession,
+    conversation_id: str,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Fetch recent conversation history for context.
+
+    Args:
+        db: Database session
+        conversation_id: The conversation ID
+        limit: Maximum number of messages to fetch (default 10)
+
+    Returns:
+        List of message dicts with role and content
+    """
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(desc(Message.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+
+    # Reverse to get chronological order and format for Claude
+    history = []
+    for msg in reversed(messages):
+        history.append({
+            "role": msg.role,
+            "content": msg.content,
+            # Include summary of code changes if present
+            "has_code_changes": bool(msg.code_changes),
+        })
+
+    return history
+
+
+def format_conversation_history(history: list[dict], max_chars: int = 8000) -> str:
+    """
+    Format conversation history for inclusion in prompts.
+
+    Args:
+        history: List of message dicts
+        max_chars: Maximum characters to include
+
+    Returns:
+        Formatted conversation history string
+    """
+    if not history:
+        return ""
+
+    parts = ["<previous_conversation>"]
+    total_chars = 0
+
+    for msg in history:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        content = msg["content"]
+
+        # Truncate long messages
+        if len(content) > 1000:
+            content = content[:1000] + "... [truncated]"
+
+        # Check if we'd exceed the limit
+        entry = f"\n**{role}:** {content}"
+        if msg.get("has_code_changes"):
+            entry += " [made code changes]"
+
+        if total_chars + len(entry) > max_chars:
+            parts.append("\n... [earlier messages omitted for brevity]")
+            break
+
+        parts.append(entry)
+        total_chars += len(entry)
+
+    parts.append("\n</previous_conversation>")
+    return "\n".join(parts)
+
+
 async def save_message(
     db: AsyncSession,
     conversation_id: str,
@@ -215,9 +294,28 @@ async def stream_chat_response(
     """
     logger.info(f"[CHAT] Starting stream for project={project_id}, conversation={conversation_id}")
 
-    # Get or create conversation and save user message
+    # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
+
+    # Fetch conversation history BEFORE saving current message
+    history = await get_conversation_history(db, conversation.id, limit=10)
+    conversation_context = format_conversation_history(history)
+
+    # Now save the user message
     await save_message(db, conversation.id, "user", message)
+
+    # Build message with conversation context
+    if conversation_context:
+        message_with_context = f"""{conversation_context}
+
+<current_request>
+{message}
+</current_request>
+
+IMPORTANT: Consider the conversation history above when processing this request. The user may be referring to previous messages, code changes, or context from earlier in the conversation."""
+        logger.info(f"[CHAT] Including {len(history)} previous messages in context")
+    else:
+        message_with_context = message
 
     # Track events for the orchestrator callback
     event_queue: asyncio.Queue = asyncio.Queue()
@@ -248,9 +346,9 @@ async def stream_chat_response(
             claude_service=claude_service,
         )
 
-        # Start processing in background
+        # Start processing in background with conversation context
         process_task = asyncio.create_task(
-            orchestrator.process_request(project_id, message)
+            orchestrator.process_request(project_id, message_with_context)
         )
 
         # Stream events as they come
@@ -454,8 +552,14 @@ async def stream_question_response(
     """
     logger.info(f"[CHAT] Answering question for project={project_id}")
 
-    # Get or create conversation and save user message
+    # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
+
+    # Fetch conversation history BEFORE saving current message
+    history = await get_conversation_history(db, conversation.id, limit=10)
+    conversation_context = format_conversation_history(history)
+
+    # Now save the user message
     await save_message(db, conversation.id, "user", question)
 
     yield create_sse_event(EventType.CONNECTED, {
@@ -475,13 +579,18 @@ async def stream_question_response(
         # Create orchestrator for context retrieval with tracked Claude service
         orchestrator = Orchestrator(db=db, claude_service=claude_service)
 
-        # Get intent, context, and project context
+        # Get intent, context, and project context (include conversation history in question)
+        question_with_context = question
+        if conversation_context:
+            question_with_context = f"{conversation_context}\n\n<current_question>\n{question}\n</current_question>"
+            logger.info(f"[CHAT] Including {len(history)} previous messages in question context")
+
         yield create_sse_event(EventType.INTENT_ANALYZED, {
             "message": "Analyzing your question...",
             "progress": 0.1,
         })
 
-        intent, context, project_context = await orchestrator.process_question(project_id, question)
+        intent, context, project_context = await orchestrator.process_question(project_id, question_with_context)
 
         yield create_sse_event(EventType.INTENT_ANALYZED, {
             "message": f"Identified as: {intent.task_type}",
@@ -499,7 +608,7 @@ async def stream_question_response(
         user_prompt = f"""<question>
 {question}
 </question>
-
+{conversation_context if conversation_context else ""}
 <project_info>
 {project_context}
 </project_info>
@@ -508,7 +617,7 @@ async def stream_question_response(
 {context.to_prompt_string()}
 </codebase_context>
 
-Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant."""
+Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant. If the user is referring to previous conversation context, use that information to provide a relevant answer."""
 
         # Stream response from Claude using the tracked service with enhanced system prompt
         messages = [{"role": "user", "content": user_prompt}]
