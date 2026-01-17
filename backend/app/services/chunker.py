@@ -46,7 +46,7 @@ class Chunker:
             max_tokens: Maximum tokens per chunk
         """
         self.max_tokens = max_tokens
-        # Use cl100k_base encoding (used by text-embedding-3-small)
+        # Use cl100k_base encoding (used by text-embedding-3-large)
         try:
             self.encoding = tiktoken.get_encoding("cl100k_base")
         except Exception:

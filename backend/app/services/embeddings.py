@@ -22,7 +22,7 @@ class EmbeddingProvider(str, Enum):
 
 # Default models for each provider
 DEFAULT_MODELS = {
-    EmbeddingProvider.OPENAI: "text-embedding-3-small",
+    EmbeddingProvider.OPENAI: "text-embedding-3-large",
     EmbeddingProvider.VOYAGE: "voyage-code-3",
 }
 
@@ -34,7 +34,7 @@ BATCH_SIZES = {
 
 # Embedding dimensions
 EMBEDDING_DIMENSIONS = {
-    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 1536,
     "text-embedding-3-large": 3072,
     "voyage-code-3": 1024,
     "voyage-code-2": 1536,

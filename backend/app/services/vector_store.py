@@ -17,7 +17,7 @@ from app.services.embeddings import get_embedding_dimension
 logger = logging.getLogger(__name__)
 
 
-# Default embedding dimension (text-embedding-3-small)
+# Default embedding dimension (text-embedding-3-large)
 DEFAULT_DIMENSION = 1536
 
 # Collection name prefix
