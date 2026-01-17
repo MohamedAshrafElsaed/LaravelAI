@@ -263,7 +263,7 @@ async def create_project(
         repo_full_name=repo.full_name,
         repo_url=repo.html_url,
         default_branch=repo.default_branch or "main",
-        status=ProjectStatus.CLONING,  # Start cloning immediately
+        status=ProjectStatus.CLONING.value,  # Start cloning immediately
     )
 
     db.add(project)
