@@ -87,83 +87,107 @@ async def get_background_db():
     await engine.dispose()
 
 
-async def clone_project_task(
+async def clone_and_index_project_task(
     project_id: str,
     github_token: str,
+    embedding_provider: str = "openai",
 ) -> None:
     """
-    Background task to clone a project repository.
+    Background task to clone a project repository and then index it.
+    This chains cloning → indexing automatically.
 
     Args:
         project_id: The project's UUID
         github_token: GitHub access token
+        embedding_provider: Embedding provider to use for indexing
     """
-    logger.info(f"[CLONE_TASK] Starting clone task for project_id={project_id}")
+    logger.info(f"[CLONE_INDEX_TASK] Starting clone and index task for project_id={project_id}")
 
     # Create a new database session for background task
     engine = create_async_engine(settings.database_url)
     async_session = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
-    logger.debug(f"[CLONE_TASK] Database session created for project_id={project_id}")
+    logger.debug(f"[CLONE_INDEX_TASK] Database session created for project_id={project_id}")
 
     async with async_session() as db:
         try:
             # Fetch project
-            logger.debug(f"[CLONE_TASK] Fetching project from database: {project_id}")
+            logger.debug(f"[CLONE_INDEX_TASK] Fetching project from database: {project_id}")
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
 
             if not project:
-                logger.error(f"[CLONE_TASK] Project not found in database: {project_id}")
+                logger.error(f"[CLONE_INDEX_TASK] Project not found in database: {project_id}")
+                await engine.dispose()
                 return
 
-            logger.info(f"[CLONE_TASK] Found project: {project.repo_full_name}, branch: {project.default_branch}")
+            logger.info(f"[CLONE_INDEX_TASK] Found project: {project.repo_full_name}, branch: {project.default_branch}")
 
-            # Clone repository
-            logger.info(f"[CLONE_TASK] Starting git clone for {project.repo_full_name}")
+            # ========== PHASE 1: CLONE ==========
+            logger.info(f"[CLONE_INDEX_TASK] Phase 1: Starting git clone for {project.repo_full_name}")
             git_service = GitService(github_token)
             clone_path = git_service.clone_repo(
                 project_id=str(project.id),
                 repo_full_name=project.repo_full_name,
                 branch=project.default_branch,
             )
-            logger.info(f"[CLONE_TASK] Clone successful, path: {clone_path}")
+            logger.info(f"[CLONE_INDEX_TASK] Clone successful, path: {clone_path}")
 
-            # Update project with clone path
+            # Update project with clone path and move to INDEXING status
             project.clone_path = clone_path
-            project.status = ProjectStatus.PENDING.value  # Ready for indexing
+            project.status = ProjectStatus.INDEXING.value  # Go directly to indexing
             project.error_message = None
             await db.commit()
-            logger.info(f"[CLONE_TASK] Project status updated to PENDING, clone_path saved")
+            logger.info(f"[CLONE_INDEX_TASK] Project status updated to INDEXING, clone_path saved")
+
+            # ========== PHASE 2: INDEX ==========
+            logger.info(f"[CLONE_INDEX_TASK] Phase 2: Starting indexing for project_id={project_id}")
+
+            # Determine embedding provider
+            provider = (
+                EmbeddingProvider.VOYAGE
+                if embedding_provider == "voyage"
+                else EmbeddingProvider.OPENAI
+            )
+            logger.info(f"[CLONE_INDEX_TASK] Using embedding provider: {provider}")
+
+            # Create indexer and run
+            indexer = ProjectIndexer(
+                db=db,
+                embedding_provider=provider,
+            )
+
+            await indexer.index_project(project_id)
+            logger.info(f"[CLONE_INDEX_TASK] Indexing completed successfully for {project_id}")
 
         except GitServiceError as e:
-            logger.error(f"[CLONE_TASK] Git service error for project {project_id}: {str(e)}")
+            logger.error(f"[CLONE_INDEX_TASK] Git service error for project {project_id}: {str(e)}")
             # Update project with error
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
             if project:
                 project.status = ProjectStatus.ERROR.value
-                project.error_message = str(e)
+                project.error_message = f"Clone failed: {str(e)}"
                 await db.commit()
-                logger.info(f"[CLONE_TASK] Project status updated to ERROR")
+                logger.info(f"[CLONE_INDEX_TASK] Project status updated to ERROR")
 
         except Exception as e:
-            logger.exception(f"[CLONE_TASK] Unexpected error for project {project_id}: {str(e)}")
+            logger.exception(f"[CLONE_INDEX_TASK] Unexpected error for project {project_id}: {str(e)}")
             # Update project with error
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
             if project:
                 project.status = ProjectStatus.ERROR.value
-                project.error_message = f"Unexpected error: {str(e)}"
+                project.error_message = f"Error: {str(e)}"
                 await db.commit()
-                logger.info(f"[CLONE_TASK] Project status updated to ERROR")
+                logger.info(f"[CLONE_INDEX_TASK] Project status updated to ERROR")
 
     await engine.dispose()
-    logger.info(f"[CLONE_TASK] Clone task completed for project_id={project_id}")
+    logger.info(f"[CLONE_INDEX_TASK] Clone and index task completed for project_id={project_id}")
 
 
 async def index_project_task(
@@ -254,7 +278,9 @@ async def create_project(
     1. Validate the GitHub repo exists and user has access
     2. Check if project already exists for this user/repo
     3. Create the project record
-    4. Trigger a background clone job
+    4. Trigger a background job to clone and index the repository
+
+    Status flow: CLONING → INDEXING → READY (or ERROR)
     """
     logger.info(f"[API] POST /projects - user_id={current_user.id}, github_repo_id={project_data.github_repo_id}")
 
@@ -310,10 +336,10 @@ async def create_project(
     await db.refresh(project)
     logger.info(f"[API] Project created with id={project.id}, status={project.status}")
 
-    # Trigger background clone job
-    logger.info(f"[API] Triggering background clone task for project_id={project.id}")
+    # Trigger background clone and index job
+    logger.info(f"[API] Triggering background clone+index task for project_id={project.id}")
     background_tasks.add_task(
-        clone_project_task,
+        clone_and_index_project_task,
         str(project.id),
         github_token,
     )
@@ -594,7 +620,9 @@ async def start_cloning(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Clone or re-clone a project's repository.
+    Clone or re-clone a project's repository and re-index it.
+
+    Status flow: CLONING → INDEXING → READY (or ERROR)
     """
     logger.info(f"[API] POST /projects/{project_id}/clone - user_id={current_user.id}")
 
@@ -629,11 +657,11 @@ async def start_cloning(
     await db.refresh(project)
     logger.info(f"[API] Project status updated to CLONING")
 
-    # Get GitHub token and trigger clone
-    logger.info(f"[API] Triggering background clone task for project_id={project.id}")
+    # Get GitHub token and trigger clone+index
+    logger.info(f"[API] Triggering background clone+index task for project_id={project.id}")
     github_token = decrypt_token(current_user.github_access_token)
     background_tasks.add_task(
-        clone_project_task,
+        clone_and_index_project_task,
         str(project.id),
         github_token,
     )
