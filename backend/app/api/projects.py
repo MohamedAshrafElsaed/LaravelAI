@@ -668,3 +668,181 @@ async def start_cloning(
 
     logger.info(f"[API] POST /projects/{project_id}/clone completed")
     return project
+
+
+# File tree response models
+class FileNode(BaseModel):
+    """A file or directory node."""
+    name: str
+    path: str
+    type: str  # 'file' or 'directory'
+    children: Optional[List["FileNode"]] = None
+    indexed: bool = False
+
+
+class FileContentResponse(BaseModel):
+    """Response for file content."""
+    path: str
+    content: str
+    indexed: bool
+
+
+@router.get("/{project_id}/files", response_model=List[FileNode])
+async def get_project_files(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the file tree structure for a project.
+
+    Returns a hierarchical list of files and directories in the cloned repo.
+    """
+    logger.info(f"[API] GET /projects/{project_id}/files - user_id={current_user.id}")
+
+    # Fetch project
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    if not project.clone_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has not been cloned yet.",
+        )
+
+    import os
+
+    # Get indexed file paths for marking
+    stmt = select(IndexedFile.file_path).where(IndexedFile.project_id == project_id)
+    result = await db.execute(stmt)
+    indexed_paths = set(row[0] for row in result.fetchall())
+
+    def build_tree(dir_path: str, relative_base: str = "") -> List[dict]:
+        """Recursively build the file tree."""
+        items = []
+
+        try:
+            entries = sorted(os.listdir(dir_path), key=lambda x: (not os.path.isdir(os.path.join(dir_path, x)), x.lower()))
+        except PermissionError:
+            return items
+
+        for entry in entries:
+            # Skip hidden files and common non-essential directories
+            if entry.startswith('.') or entry in ['node_modules', 'vendor', '__pycache__', '.git']:
+                continue
+
+            full_path = os.path.join(dir_path, entry)
+            relative_path = os.path.join(relative_base, entry) if relative_base else entry
+
+            if os.path.isdir(full_path):
+                children = build_tree(full_path, relative_path)
+                # Only include directories that have children
+                if children:
+                    items.append({
+                        "name": entry,
+                        "path": relative_path,
+                        "type": "directory",
+                        "children": children,
+                        "indexed": False,
+                    })
+            else:
+                # Include PHP, Blade, JS, CSS, JSON, and config files
+                ext = entry.split('.')[-1].lower() if '.' in entry else ''
+                if ext in ['php', 'blade', 'js', 'ts', 'vue', 'jsx', 'tsx', 'css', 'scss', 'json', 'yaml', 'yml', 'md', 'env', 'sql']:
+                    items.append({
+                        "name": entry,
+                        "path": relative_path,
+                        "type": "file",
+                        "indexed": relative_path in indexed_paths,
+                    })
+
+        return items
+
+    tree = build_tree(project.clone_path)
+    logger.info(f"[API] Returning file tree with {len(tree)} root items")
+    return tree
+
+
+@router.get("/{project_id}/files/{file_path:path}", response_model=FileContentResponse)
+async def get_file_content(
+    project_id: str,
+    file_path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the content of a specific file.
+    """
+    logger.info(f"[API] GET /projects/{project_id}/files/{file_path} - user_id={current_user.id}")
+
+    # Fetch project
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+
+    if not project.clone_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has not been cloned yet.",
+        )
+
+    import os
+
+    full_path = os.path.join(project.clone_path, file_path)
+
+    # Security check - ensure path is within clone_path
+    real_clone_path = os.path.realpath(project.clone_path)
+    real_file_path = os.path.realpath(full_path)
+    if not real_file_path.startswith(real_clone_path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied.",
+        )
+
+    if not os.path.isfile(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found.",
+        )
+
+    # Check if indexed
+    stmt = select(IndexedFile).where(
+        IndexedFile.project_id == project_id,
+        IndexedFile.file_path == file_path,
+    )
+    result = await db.execute(stmt)
+    indexed_file = result.scalar_one_or_none()
+
+    # Read file content
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        # Try reading as binary and decode
+        with open(full_path, 'rb') as f:
+            content = f.read().decode('utf-8', errors='replace')
+
+    return FileContentResponse(
+        path=file_path,
+        content=content,
+        indexed=indexed_file is not None,
+    )
