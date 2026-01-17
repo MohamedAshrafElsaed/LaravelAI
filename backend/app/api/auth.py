@@ -38,6 +38,18 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class CodeExchangeRequest(BaseModel):
+    """Request model for code exchange."""
+    code: str
+
+
+class AuthResponse(BaseModel):
+    """Response model for authentication."""
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
 @router.get("/github")
 async def github_login():
     """
@@ -161,6 +173,119 @@ async def github_callback(
     # Redirect to frontend with token
     redirect_url = f"{settings.frontend_url}/auth/success?token={access_token}"
     return RedirectResponse(url=redirect_url)
+
+
+@router.post("/github/callback", response_model=AuthResponse)
+async def github_callback_post(
+    request: CodeExchangeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Handle GitHub OAuth callback via POST (for frontend-initiated flow).
+
+    This endpoint accepts the authorization code in the request body
+    and returns the JWT token directly instead of redirecting.
+    """
+    code = request.code
+
+    # Exchange code for access token
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": settings.github_client_id,
+                "client_secret": settings.github_client_secret,
+                "code": code,
+            },
+            headers={"Accept": "application/json"},
+        )
+
+        if token_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate with GitHub",
+            )
+
+        token_data = token_response.json()
+        github_token = token_data.get("access_token")
+
+        if not github_token:
+            error = token_data.get("error_description", "No access token received")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"GitHub OAuth error: {error}",
+            )
+
+        # Get user info from GitHub
+        user_response = await client.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/json",
+            },
+        )
+
+        if user_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to fetch user info from GitHub",
+            )
+
+        github_user = user_response.json()
+
+        # Get user email (may be private)
+        email_response = await client.get(
+            "https://api.github.com/user/emails",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/json",
+            },
+        )
+        emails = email_response.json() if email_response.status_code == 200 else []
+        primary_email = next(
+            (e["email"] for e in emails if e.get("primary")), None
+        )
+
+    # Encrypt the GitHub token before storage
+    encrypted_token = encrypt_token(github_token)
+
+    # Find or create user
+    stmt = select(User).where(User.github_id == github_user["id"])
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user:
+        # Update existing user
+        user.github_access_token = encrypted_token
+        user.avatar_url = github_user.get("avatar_url")
+        user.username = github_user["login"]
+        if primary_email:
+            user.email = primary_email
+    else:
+        # Create new user
+        user = User(
+            github_id=github_user["id"],
+            username=github_user["login"],
+            email=primary_email,
+            avatar_url=github_user.get("avatar_url"),
+            github_access_token=encrypted_token,
+        )
+        db.add(user)
+
+    await db.flush()
+
+    # Create JWT
+    access_token = create_access_token(user.id)
+
+    return AuthResponse(
+        access_token=access_token,
+        user=UserResponse(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            avatar_url=user.avatar_url,
+        ),
+    )
 
 
 @router.get("/me", response_model=UserResponse)
