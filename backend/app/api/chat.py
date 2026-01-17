@@ -10,15 +10,16 @@ from typing import List, Optional, AsyncGenerator
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.models import Project, User, ProjectStatus
+from app.models.models import Project, User, ProjectStatus, Conversation, Message
 from app.agents.orchestrator import Orchestrator, ProcessEvent, ProcessPhase
 from app.services.claude import get_claude_service, ClaudeModel
 
@@ -29,11 +30,30 @@ router = APIRouter()
 
 # ============== Request/Response Models ==============
 
-class ChatMessage(BaseModel):
+class ChatMessageResponse(BaseModel):
     """A single chat message."""
+    id: str
     role: str  # user, assistant, system
     content: str
-    timestamp: Optional[datetime] = None
+    code_changes: Optional[dict] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationResponse(BaseModel):
+    """Conversation summary."""
+    id: str
+    project_id: str
+    title: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+    last_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ChatRequest(BaseModel):
@@ -45,7 +65,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response for non-streaming chat."""
     conversation_id: str
-    message: ChatMessage
+    message: ChatMessageResponse
     code_changes: Optional[dict] = None
 
 
@@ -111,12 +131,76 @@ async def verify_project_access(
     return project
 
 
+async def get_or_create_conversation(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+    conversation_id: Optional[str] = None,
+) -> Conversation:
+    """Get existing conversation or create new one."""
+    if conversation_id:
+        # Try to get existing conversation
+        stmt = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+            Conversation.project_id == project_id,
+        )
+        result = await db.execute(stmt)
+        conversation = result.scalar_one_or_none()
+        if conversation:
+            return conversation
+
+    # Create new conversation
+    conversation = Conversation(
+        id=conversation_id or str(uuid4()),
+        user_id=user_id,
+        project_id=project_id,
+    )
+    db.add(conversation)
+    await db.commit()
+    await db.refresh(conversation)
+    return conversation
+
+
+async def save_message(
+    db: AsyncSession,
+    conversation_id: str,
+    role: str,
+    content: str,
+    code_changes: Optional[dict] = None,
+    tokens_used: Optional[int] = None,
+) -> Message:
+    """Save a message to the database."""
+    message = Message(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        code_changes=code_changes,
+        tokens_used=tokens_used,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+
+    # Update conversation title if first user message
+    stmt = select(Conversation).where(Conversation.id == conversation_id)
+    result = await db.execute(stmt)
+    conversation = result.scalar_one_or_none()
+    if conversation and not conversation.title and role == "user":
+        # Use first 50 chars of first user message as title
+        conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+        await db.commit()
+
+    return message
+
+
 # ============== Streaming Generator ==============
 
 async def stream_chat_response(
     project_id: str,
     message: str,
     conversation_id: str,
+    user_id: str,
     db: AsyncSession,
 ) -> AsyncGenerator[str, None]:
     """
@@ -125,6 +209,10 @@ async def stream_chat_response(
     Yields SSE events as the orchestrator processes the request.
     """
     logger.info(f"[CHAT] Starting stream for project={project_id}, conversation={conversation_id}")
+
+    # Get or create conversation and save user message
+    conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
+    await save_message(db, conversation.id, "user", message)
 
     # Track events for the orchestrator callback
     event_queue: asyncio.Queue = asyncio.Queue()
@@ -135,7 +223,7 @@ async def stream_chat_response(
 
     # Send connected event
     yield create_sse_event(EventType.CONNECTED, {
-        "conversation_id": conversation_id,
+        "conversation_id": conversation.id,
         "message": "Connected to chat stream",
     })
 
@@ -173,9 +261,33 @@ async def stream_chat_response(
             if sse_event:
                 yield sse_event
 
+        # Build assistant response content
+        if result.success:
+            summary_parts = []
+            if result.plan:
+                summary_parts.append(f"**Plan:** {result.plan.summary}")
+            if result.execution_results:
+                summary_parts.append(f"\n**Files changed:** {len(result.execution_results)}")
+                for r in result.execution_results:
+                    summary_parts.append(f"- [{r.action}] {r.file}")
+            if result.validation:
+                summary_parts.append(f"\n**Validation score:** {result.validation.score}/100")
+            response_content = "\n".join(summary_parts) if summary_parts else "Task completed successfully."
+        else:
+            response_content = f"Failed to process request: {result.error}"
+
+        # Save assistant message
+        code_changes = {
+            "results": [r.to_dict() for r in result.execution_results],
+            "validation": result.validation.to_dict() if result.validation else None,
+        } if result.execution_results else None
+
+        await save_message(db, conversation.id, "assistant", response_content, code_changes)
+
         # Send final complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": result.success,
+            "answer": response_content,
             "plan": result.plan.to_dict() if result.plan else None,
             "execution_results": [r.to_dict() for r in result.execution_results],
             "validation": result.validation.to_dict() if result.validation else None,
@@ -184,6 +296,8 @@ async def stream_chat_response(
 
     except Exception as e:
         logger.exception(f"[CHAT] Stream error: {e}")
+        # Save error as assistant message
+        await save_message(db, conversation.id, "assistant", f"Error: {str(e)}")
         yield create_sse_event(EventType.ERROR, {
             "message": str(e),
         })
@@ -249,6 +363,7 @@ async def stream_question_response(
     project_id: str,
     question: str,
     conversation_id: str,
+    user_id: str,
     db: AsyncSession,
 ) -> AsyncGenerator[str, None]:
     """
@@ -258,8 +373,12 @@ async def stream_question_response(
     """
     logger.info(f"[CHAT] Answering question for project={project_id}")
 
+    # Get or create conversation and save user message
+    conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
+    await save_message(db, conversation.id, "user", question)
+
     yield create_sse_event(EventType.CONNECTED, {
-        "conversation_id": conversation_id,
+        "conversation_id": conversation.id,
         "message": "Connected to chat stream",
     })
 
@@ -317,6 +436,9 @@ Please answer the question based on this codebase context."""
                 "chunk": chunk,
             })
 
+        # Save assistant message
+        await save_message(db, conversation.id, "assistant", full_response)
+
         # Send complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": True,
@@ -325,12 +447,160 @@ Please answer the question based on this codebase context."""
 
     except Exception as e:
         logger.exception(f"[CHAT] Question stream error: {e}")
+        await save_message(db, conversation.id, "assistant", f"Error: {str(e)}")
         yield create_sse_event(EventType.ERROR, {
             "message": str(e),
         })
 
 
 # ============== API Endpoints ==============
+
+@router.get("/{project_id}/conversations", response_model=List[ConversationResponse])
+async def list_conversations(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """
+    List all conversations for a project.
+
+    Returns conversations sorted by most recent first.
+    """
+    logger.info(f"[CHAT] GET /projects/{project_id}/conversations - user_id={current_user.id}")
+
+    # Verify project access (but don't require READY status for viewing history)
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # Get conversations with message count
+    stmt = (
+        select(Conversation)
+        .options(selectinload(Conversation.messages))
+        .where(
+            Conversation.project_id == project_id,
+            Conversation.user_id == current_user.id,
+        )
+        .order_by(desc(Conversation.updated_at))
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    conversations = result.scalars().all()
+
+    # Build response with message counts
+    response = []
+    for conv in conversations:
+        last_msg = None
+        if conv.messages:
+            sorted_messages = sorted(conv.messages, key=lambda m: m.created_at, reverse=True)
+            if sorted_messages:
+                last_msg = sorted_messages[0].content[:100]
+
+        response.append(ConversationResponse(
+            id=conv.id,
+            project_id=conv.project_id,
+            title=conv.title,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            message_count=len(conv.messages),
+            last_message=last_msg,
+        ))
+
+    return response
+
+
+@router.get("/{project_id}/conversations/{conversation_id}", response_model=List[ChatMessageResponse])
+async def get_conversation_messages(
+    project_id: str,
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get all messages in a conversation.
+
+    Returns messages in chronological order.
+    """
+    logger.info(f"[CHAT] GET /projects/{project_id}/conversations/{conversation_id} - user_id={current_user.id}")
+
+    # Verify conversation belongs to user and project
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.project_id == project_id,
+        Conversation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    # Get messages
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at)
+    )
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+
+    return [
+        ChatMessageResponse(
+            id=msg.id,
+            role=msg.role,
+            content=msg.content,
+            code_changes=msg.code_changes,
+            created_at=msg.created_at,
+        )
+        for msg in messages
+    ]
+
+
+@router.delete("/{project_id}/conversations/{conversation_id}")
+async def delete_conversation(
+    project_id: str,
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a conversation and all its messages."""
+    logger.info(f"[CHAT] DELETE /projects/{project_id}/conversations/{conversation_id} - user_id={current_user.id}")
+
+    # Verify conversation belongs to user and project
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.project_id == project_id,
+        Conversation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    await db.delete(conversation)
+    await db.commit()
+
+    return {"message": "Conversation deleted"}
+
 
 @router.post("/{project_id}/chat")
 async def chat_with_project(
@@ -379,6 +649,7 @@ async def chat_with_project(
                 project_id=project_id,
                 question=request.message,
                 conversation_id=conversation_id,
+                user_id=current_user.id,
                 db=db,
             ),
             media_type="text/event-stream",
@@ -395,6 +666,7 @@ async def chat_with_project(
                 project_id=project_id,
                 message=request.message,
                 conversation_id=conversation_id,
+                user_id=current_user.id,
                 db=db,
             ),
             media_type="text/event-stream",
@@ -424,7 +696,13 @@ async def chat_sync(
     # Verify project access
     project = await verify_project_access(project_id, current_user, db)
 
-    conversation_id = request.conversation_id or str(uuid4())
+    # Get or create conversation
+    conversation = await get_or_create_conversation(
+        db, current_user.id, project_id, request.conversation_id
+    )
+
+    # Save user message
+    await save_message(db, conversation.id, "user", request.message)
 
     try:
         # Create orchestrator
@@ -453,12 +731,16 @@ Answer the user's question based on the provided codebase context."""
                 system=system_prompt,
             )
 
+            # Save assistant message
+            saved_message = await save_message(db, conversation.id, "assistant", response_text)
+
             return ChatResponse(
-                conversation_id=conversation_id,
-                message=ChatMessage(
+                conversation_id=conversation.id,
+                message=ChatMessageResponse(
+                    id=saved_message.id,
                     role="assistant",
                     content=response_text,
-                    timestamp=datetime.utcnow(),
+                    created_at=saved_message.created_at,
                 ),
             )
 
@@ -482,17 +764,26 @@ Answer the user's question based on the provided codebase context."""
             else:
                 response_content = f"Failed to process request: {result.error}"
 
+            code_changes = {
+                "results": [r.to_dict() for r in result.execution_results],
+                "validation": result.validation.to_dict() if result.validation else None,
+            } if result.execution_results else None
+
+            # Save assistant message
+            saved_message = await save_message(
+                db, conversation.id, "assistant", response_content, code_changes
+            )
+
             return ChatResponse(
-                conversation_id=conversation_id,
-                message=ChatMessage(
+                conversation_id=conversation.id,
+                message=ChatMessageResponse(
+                    id=saved_message.id,
                     role="assistant",
                     content=response_content,
-                    timestamp=datetime.utcnow(),
+                    code_changes=code_changes,
+                    created_at=saved_message.created_at,
                 ),
-                code_changes={
-                    "results": [r.to_dict() for r in result.execution_results],
-                    "validation": result.validation.to_dict() if result.validation else None,
-                } if result.execution_results else None,
+                code_changes=code_changes,
             )
 
     except Exception as e:
@@ -501,21 +792,3 @@ Answer the user's question based on the provided codebase context."""
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
-
-
-@router.get("/{conversation_id}/messages", response_model=List[ChatMessage])
-async def get_messages(
-    conversation_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Get all messages in a conversation.
-
-    Note: Conversation history storage is not yet implemented.
-    """
-    logger.info(f"[CHAT] GET /chat/{conversation_id}/messages - user_id={current_user.id}")
-
-    # TODO: Implement conversation history storage
-    # For now, return empty list
-    return []

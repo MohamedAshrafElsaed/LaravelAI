@@ -81,16 +81,20 @@ export const githubApi = {
 };
 
 export const chatApi = {
-  // Send message
-  send: (projectId: string, message: string, conversationId?: string) =>
-    api.post('/chat', { project_id: projectId, message, conversation_id: conversationId }),
+  // List conversations for a project
+  listConversations: (projectId: string) =>
+    api.get(`/projects/${projectId}/conversations`),
 
-  // Get conversation messages
-  getMessages: (conversationId: string) =>
-    api.get(`/chat/${conversationId}/messages`),
+  // Get messages for a conversation
+  getMessages: (projectId: string, conversationId: string) =>
+    api.get(`/projects/${projectId}/conversations/${conversationId}`),
 
-  // Stream response (for SSE)
-  streamUrl: (projectId: string) => `${API_URL}/chat/stream`,
+  // Delete a conversation
+  deleteConversation: (projectId: string, conversationId: string) =>
+    api.delete(`/projects/${projectId}/conversations/${conversationId}`),
+
+  // Chat endpoint URL (for SSE)
+  getChatUrl: (projectId: string) => `${API_URL}/projects/${projectId}/chat`,
 };
 
 export default api;

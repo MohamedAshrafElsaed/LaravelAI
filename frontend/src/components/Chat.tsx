@@ -1,16 +1,26 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, User, Bot, Loader2 } from 'lucide-react';
+import { Send, User, Bot, Loader2, Plus, Trash2, MessageSquare, History } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { InlineProgress } from './InlineProgress';
+import { chatApi } from '@/lib/api';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+}
+
+interface Conversation {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message: string | null;
 }
 
 interface ProcessingEvent {
@@ -25,14 +35,13 @@ interface ProcessingEvent {
     validation?: any;
     chunks_count?: number;
     fixing?: boolean;
+    conversation_id?: string;
     [key: string]: any;
   };
 }
 
 interface ChatProps {
   projectId: string;
-  onProcessingStart?: () => void;
-  onProcessingEnd?: () => void;
   onProcessingEvent?: (event: ProcessingEvent) => void;
 }
 
@@ -44,8 +53,6 @@ function isRTL(text: string): boolean {
 
 export function Chat({
   projectId,
-  onProcessingStart,
-  onProcessingEnd,
   onProcessingEvent,
 }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -55,8 +62,59 @@ export function Chat({
   const [streamingContent, setStreamingContent] = useState('');
   const [processingEvents, setProcessingEvents] = useState<ProcessingEvent[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load conversations list
+  const loadConversations = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const response = await chatApi.listConversations(projectId);
+      setConversations(response.data);
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [projectId]);
+
+  // Load messages for a conversation
+  const loadMessages = useCallback(async (convId: string) => {
+    setLoadingMessages(true);
+    try {
+      const response = await chatApi.getMessages(projectId, convId);
+      const loadedMessages: Message[] = response.data.map((msg: any) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.created_at),
+      }));
+      setMessages(loadedMessages);
+      setConversationId(convId);
+      setShowHistory(false);
+
+      // Save to localStorage
+      localStorage.setItem(`conversation_${projectId}`, convId);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [projectId]);
+
+  // Load saved conversation on mount
+  useEffect(() => {
+    const savedConvId = localStorage.getItem(`conversation_${projectId}`);
+    if (savedConvId) {
+      loadMessages(savedConvId);
+    }
+    loadConversations();
+  }, [projectId, loadMessages, loadConversations]);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -75,6 +133,30 @@ export function Chat({
     }
   }, [input]);
 
+  // Start a new conversation
+  const startNewConversation = () => {
+    setConversationId(null);
+    setMessages([]);
+    setShowHistory(false);
+    localStorage.removeItem(`conversation_${projectId}`);
+  };
+
+  // Delete a conversation
+  const deleteConversation = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Delete this conversation?')) return;
+
+    try {
+      await chatApi.deleteConversation(projectId, convId);
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      if (convId === conversationId) {
+        startNewConversation();
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
+  };
+
   // Parse SSE chunk properly
   const parseSSEChunk = (chunk: string): { eventType: string | null; data: any }[] => {
     const results: { eventType: string | null; data: any }[] = [];
@@ -91,14 +173,13 @@ export function Chat({
           const jsonStr = trimmedLine.replace('data:', '').trim();
           if (jsonStr) {
             const data = JSON.parse(jsonStr);
-            // Use event type from the data if available, otherwise use the SSE event type
             const eventType = data.event || currentEventType || 'unknown';
             results.push({ eventType, data: { ...data, event: eventType } });
           }
         } catch (e) {
-          // Ignore parse errors for incomplete chunks
+          // Ignore parse errors
         }
-        currentEventType = null; // Reset after processing data
+        currentEventType = null;
       }
     }
 
@@ -124,10 +205,7 @@ export function Chat({
     setProcessingEvents([]);
     setIsProcessing(true);
 
-    onProcessingStart?.();
-
     try {
-      // Use fetch for SSE
       const token = localStorage.getItem('auth_token');
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/projects/${projectId}/chat`,
@@ -137,7 +215,10 @@ export function Chat({
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ message: userMessage.content }),
+          body: JSON.stringify({
+            message: userMessage.content,
+            conversation_id: conversationId,
+          }),
         }
       );
 
@@ -149,6 +230,7 @@ export function Chat({
       const decoder = new TextDecoder();
       let fullContent = '';
       let buffer = '';
+      let newConversationId: string | null = null;
 
       if (reader) {
         while (true) {
@@ -158,9 +240,8 @@ export function Chat({
           const chunk = decoder.decode(value, { stream: true });
           buffer += chunk;
 
-          // Process complete SSE messages (separated by double newlines)
           const messages = buffer.split('\n\n');
-          buffer = messages.pop() || ''; // Keep incomplete message in buffer
+          buffer = messages.pop() || '';
 
           for (const message of messages) {
             if (!message.trim()) continue;
@@ -168,25 +249,26 @@ export function Chat({
             const parsedEvents = parseSSEChunk(message);
 
             for (const { eventType, data } of parsedEvents) {
-              // Create processing event
               const event: ProcessingEvent = {
                 event: eventType || 'unknown',
                 data,
               };
 
-              // Add to processing events for inline progress
-              setProcessingEvents((prev) => [...prev, event]);
+              // Capture conversation_id from connected event
+              if (eventType === 'connected' && data.conversation_id) {
+                newConversationId = data.conversation_id;
+                setConversationId(data.conversation_id);
+                localStorage.setItem(`conversation_${projectId}`, data.conversation_id);
+              }
 
-              // Also emit to parent for sidebar (if still needed)
+              setProcessingEvents((prev) => [...prev, event]);
               onProcessingEvent?.(event);
 
-              // Handle answer chunks (streaming text)
               if (data.chunk) {
                 fullContent += data.chunk;
                 setStreamingContent(fullContent);
               }
 
-              // Handle complete event
               if (eventType === 'complete' || data.success !== undefined) {
                 if (data.answer) {
                   fullContent = data.answer;
@@ -195,7 +277,6 @@ export function Chat({
                 setIsProcessing(false);
               }
 
-              // Handle error
               if (eventType === 'error') {
                 setIsProcessing(false);
               }
@@ -203,7 +284,7 @@ export function Chat({
           }
         }
 
-        // Process any remaining buffer
+        // Process remaining buffer
         if (buffer.trim()) {
           const parsedEvents = parseSSEChunk(buffer);
           for (const { eventType, data } of parsedEvents) {
@@ -225,20 +306,19 @@ export function Chat({
         }
       }
 
-      // Add assistant message with the final content
-      // Use functional update to get latest processingEvents
-      setMessages((prev) => {
-        // Don't add empty messages
-        if (!fullContent) return prev;
-
+      // Add assistant message
+      if (fullContent) {
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           content: fullContent,
           timestamp: new Date(),
         };
-        return [...prev, assistantMessage];
-      });
+        setMessages((prev) => [...prev, assistantMessage]);
+      }
+
+      // Refresh conversations list
+      loadConversations();
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {
@@ -253,9 +333,8 @@ export function Chat({
       setIsStreaming(false);
       setStreamingContent('');
       setIsProcessing(false);
-      onProcessingEnd?.();
     }
-  }, [input, isLoading, projectId, onProcessingStart, onProcessingEnd, onProcessingEvent]);
+  }, [input, isLoading, projectId, conversationId, onProcessingEvent, loadConversations]);
 
   // Handle key press
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -267,9 +346,91 @@ export function Chat({
 
   return (
     <div className="flex h-full flex-col bg-gray-950">
+      {/* Header with actions */}
+      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              showHistory
+                ? 'bg-blue-500/20 text-blue-400'
+                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+            }`}
+          >
+            <History className="h-4 w-4" />
+            <span className="hidden sm:inline">History</span>
+            {conversations.length > 0 && (
+              <span className="ml-1 rounded-full bg-gray-700 px-1.5 py-0.5 text-xs">
+                {conversations.length}
+              </span>
+            )}
+          </button>
+        </div>
+        <button
+          onClick={startNewConversation}
+          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">New Chat</span>
+        </button>
+      </div>
+
+      {/* Conversation history sidebar */}
+      {showHistory && (
+        <div className="border-b border-gray-800 bg-gray-900/50 max-h-64 overflow-y-auto">
+          {loadingHistory ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="py-8 text-center text-sm text-gray-500">
+              No previous conversations
+            </div>
+          ) : (
+            <div className="p-2 space-y-1">
+              {conversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => loadMessages(conv.id)}
+                  className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors group ${
+                    conv.id === conversationId
+                      ? 'bg-blue-500/20 text-white'
+                      : 'text-gray-300 hover:bg-gray-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <MessageSquare className="h-4 w-4 shrink-0 text-gray-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">
+                        {conv.title || 'Untitled conversation'}
+                      </div>
+                      {conv.last_message && (
+                        <div className="truncate text-xs text-gray-500 mt-0.5">
+                          {conv.last_message}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => deleteConversation(conv.id, e)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && !isStreaming && (
+        {loadingMessages ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+          </div>
+        ) : messages.length === 0 && !isStreaming ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-gray-500">
               <Bot className="mx-auto h-12 w-12 mb-4 opacity-50" />
@@ -279,48 +440,50 @@ export function Chat({
               </p>
             </div>
           </div>
-        )}
+        ) : (
+          <>
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
 
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
-        ))}
+            {/* Inline Progress (while processing) */}
+            {isProcessing && processingEvents.length > 0 && (
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20 shrink-0">
+                  <Bot className="h-4 w-4 text-purple-400" />
+                </div>
+                <div className="flex-1 max-w-[85%]">
+                  <InlineProgress events={processingEvents} isProcessing={isProcessing} />
+                </div>
+              </div>
+            )}
 
-        {/* Inline Progress (while processing) */}
-        {isProcessing && processingEvents.length > 0 && (
-          <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20 shrink-0">
-              <Bot className="h-4 w-4 text-purple-400" />
-            </div>
-            <div className="flex-1 max-w-[85%]">
-              <InlineProgress events={processingEvents} isProcessing={isProcessing} />
-            </div>
-          </div>
-        )}
+            {/* Streaming message */}
+            {isStreaming && streamingContent && !isProcessing && (
+              <MessageBubble
+                message={{
+                  id: 'streaming',
+                  role: 'assistant',
+                  content: streamingContent,
+                  timestamp: new Date(),
+                }}
+                isStreaming
+              />
+            )}
 
-        {/* Streaming message */}
-        {isStreaming && streamingContent && !isProcessing && (
-          <MessageBubble
-            message={{
-              id: 'streaming',
-              role: 'assistant',
-              content: streamingContent,
-              timestamp: new Date(),
-            }}
-            isStreaming
-          />
-        )}
-
-        {/* Loading indicator (before any events) */}
-        {isLoading && processingEvents.length === 0 && !streamingContent && (
-          <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20">
-              <Bot className="h-4 w-4 text-purple-400" />
-            </div>
-            <div className="flex items-center gap-2 text-gray-400 bg-gray-800 rounded-lg px-4 py-3">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Starting AI processing...</span>
-            </div>
-          </div>
+            {/* Loading indicator (before any events) */}
+            {isLoading && processingEvents.length === 0 && !streamingContent && (
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20">
+                  <Bot className="h-4 w-4 text-purple-400" />
+                </div>
+                <div className="flex items-center gap-2 text-gray-400 bg-gray-800 rounded-lg px-4 py-3">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Starting AI processing...</span>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         <div ref={messagesEndRef} />
