@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db, close_db
-from app.api import auth, health, projects, chat
+from app.api import auth, health, projects, chat, github
 
 
 @asynccontextmanager
@@ -51,6 +51,9 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix=f"{settings.api_prefix}/auth", tags=["Auth"])
 app.include_router(
     projects.router, prefix=f"{settings.api_prefix}/projects", tags=["Projects"]
+)
+app.include_router(
+    github.router, prefix=f"{settings.api_prefix}/github", tags=["GitHub"]
 )
 app.include_router(
     chat.router, prefix=f"{settings.api_prefix}/chat", tags=["Chat"]

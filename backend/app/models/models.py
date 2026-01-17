@@ -22,6 +22,7 @@ def generate_uuid() -> str:
 
 class ProjectStatus(str, Enum):
     PENDING = "pending"
+    CLONING = "cloning"
     INDEXING = "indexing"
     READY = "ready"
     ERROR = "error"
@@ -77,9 +78,13 @@ class Project(Base):
 
     # GitHub info
     github_repo_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(255))  # repo name only
     repo_full_name: Mapped[str] = mapped_column(String(255))  # owner/repo
     repo_url: Mapped[str] = mapped_column(String(500))
     default_branch: Mapped[str] = mapped_column(String(100), default="main")
+
+    # Clone path for local repository
+    clone_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Indexing status
     status: Mapped[ProjectStatus] = mapped_column(

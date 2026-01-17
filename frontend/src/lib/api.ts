@@ -56,8 +56,8 @@ export const projectsApi = {
   list: () => api.get('/projects'),
 
   // Create new project (connect repo)
-  create: (repoFullName: string) =>
-    api.post('/projects', { repo_full_name: repoFullName }),
+  create: (githubRepoId: number) =>
+    api.post('/projects', { github_repo_id: githubRepoId }),
 
   // Get single project
   get: (id: string) => api.get(`/projects/${id}`),
@@ -65,8 +65,19 @@ export const projectsApi = {
   // Start indexing
   startIndexing: (id: string) => api.post(`/projects/${id}/index`),
 
+  // Start cloning
+  startCloning: (id: string) => api.post(`/projects/${id}/clone`),
+
   // Delete project
   delete: (id: string) => api.delete(`/projects/${id}`),
+};
+
+export const githubApi = {
+  // List user's GitHub repos (filtered to PHP/Laravel)
+  listRepos: () => api.get('/github/repos'),
+
+  // Get specific repo by ID
+  getRepo: (repoId: number) => api.get(`/github/repos/${repoId}`),
 };
 
 export const chatApi = {
