@@ -20,6 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Check if table already exists
+    conn = op.get_bind()
+    result = conn.execute(sa.text(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'git_changes')"
+    ))
+    table_exists = result.scalar()
+
+    if table_exists:
+        # Table already exists, skip creation
+        return
+
     # Create git_changes table for tracking all git changes per conversation
     op.create_table(
         'git_changes',
