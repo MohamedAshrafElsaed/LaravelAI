@@ -70,6 +70,41 @@ class Settings(BaseSettings):
     log_dir: str = ""  # Empty means console only, set to path for file logging
     log_json: bool = False  # Use JSON format for logs (recommended for production)
 
+    # Batch Processing
+    batch_processing_enabled: bool = True
+    batch_max_size: int = 100
+    batch_poll_interval_seconds: int = 5
+
+    # Prompt Caching
+    prompt_caching_enabled: bool = True
+    prompt_cache_min_tokens: int = 1024  # Minimum tokens to cache
+
+    # Subagents
+    subagents_enabled: bool = True
+    subagents_enable_caching: bool = True
+
+    # Hooks
+    hooks_enabled: bool = True
+    hooks_audit_log_enabled: bool = True
+    hooks_max_audit_entries: int = 10000
+    hooks_default_user_daily_budget: float = 10.0  # Default $10/day per user
+
+    # Session Management
+    sessions_enabled: bool = True
+    sessions_storage_dir: str = "/tmp/laravelai_sessions"
+    sessions_default_ttl_hours: int = 24
+    sessions_max_messages: int = 100
+
+    # Multilingual Support
+    multilingual_enabled: bool = True
+    multilingual_default_language: str = "en"
+    multilingual_auto_detect: bool = True
+    multilingual_translate_responses: bool = False  # Set to True to auto-translate
+
+    # Structured Outputs
+    structured_outputs_enabled: bool = True
+    structured_outputs_strict_validation: bool = True
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
