@@ -19,7 +19,6 @@ import { useAuthStore } from '@/lib/store';
 import { FileTree } from '@/components/FileTree';
 import { Chat } from '@/components/Chat';
 import { CodeViewer } from '@/components/CodeViewer';
-import { ProgressTracker } from '@/components/ProgressTracker';
 import { ChangesReview } from '@/components/ChangesReview';
 
 interface Project {
@@ -51,9 +50,7 @@ export default function ProjectPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  // AI processing state
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingEvents, setProcessingEvents] = useState<any[]>([]);
+  // AI execution results (for changes review)
   const [executionResults, setExecutionResults] = useState<any[]>([]);
 
   useEffect(() => {
@@ -109,25 +106,13 @@ export default function ProjectPage() {
 
   // Handle AI processing events
   const handleProcessingEvent = (event: any) => {
-    setProcessingEvents((prev) => [...prev, event]);
-
+    // Check for execution results in complete event
     if (event.event === 'complete' && event.data?.execution_results) {
       setExecutionResults(event.data.execution_results);
       if (event.data.execution_results.length > 0) {
         setViewMode('changes');
       }
     }
-  };
-
-  // Handle processing start/end
-  const handleProcessingStart = () => {
-    setIsProcessing(true);
-    setProcessingEvents([]);
-    setExecutionResults([]);
-  };
-
-  const handleProcessingEnd = () => {
-    setIsProcessing(false);
   };
 
   // Status badge
@@ -318,24 +303,10 @@ export default function ProjectPage() {
             {/* View Content */}
             <div className="flex-1 overflow-hidden">
               {viewMode === 'chat' && (
-                <div className="flex h-full">
-                  {/* Chat Area */}
-                  <div className={`flex-1 min-w-0 ${isProcessing ? 'lg:w-1/2' : 'w-full'}`}>
-                    <Chat
-                      projectId={projectId}
-                      onProcessingStart={handleProcessingStart}
-                      onProcessingEnd={handleProcessingEnd}
-                      onProcessingEvent={handleProcessingEvent}
-                    />
-                  </div>
-
-                  {/* Progress Tracker (when processing) */}
-                  {isProcessing && (
-                    <div className="hidden lg:block w-96 border-l border-gray-800 overflow-hidden">
-                      <ProgressTracker events={processingEvents} />
-                    </div>
-                  )}
-                </div>
+                <Chat
+                  projectId={projectId}
+                  onProcessingEvent={handleProcessingEvent}
+                />
               )}
 
               {viewMode === 'code' && (

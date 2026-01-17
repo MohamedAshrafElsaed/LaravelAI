@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'] });
+// Use system font stack instead of Google Fonts for reliability
+const fontClass = 'font-sans';
 
 export const metadata: Metadata = {
   title: 'Laravel AI - AI-Powered Code Assistant',
@@ -16,7 +16,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} min-h-screen bg-gray-950 text-gray-200 antialiased`}>
+      <body className={`${fontClass} min-h-screen bg-gray-950 text-gray-200 antialiased`}>
         <div className="relative flex min-h-screen flex-col">
           {/* Navigation */}
           <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-gray-950/95 backdrop-blur">

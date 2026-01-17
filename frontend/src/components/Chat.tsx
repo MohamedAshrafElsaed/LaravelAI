@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, User, Bot, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api } from '@/lib/api';
+import { InlineProgress } from './InlineProgress';
 
 interface Message {
   id: string;
@@ -13,11 +13,27 @@ interface Message {
   timestamp: Date;
 }
 
+interface ProcessingEvent {
+  event: string;
+  data: {
+    message?: string;
+    progress?: number;
+    timestamp?: string;
+    intent?: any;
+    plan?: any;
+    step?: any;
+    validation?: any;
+    chunks_count?: number;
+    fixing?: boolean;
+    [key: string]: any;
+  };
+}
+
 interface ChatProps {
   projectId: string;
   onProcessingStart?: () => void;
   onProcessingEnd?: () => void;
-  onProcessingEvent?: (event: any) => void;
+  onProcessingEvent?: (event: ProcessingEvent) => void;
 }
 
 // Detect RTL text (Arabic, Hebrew, etc.)
@@ -37,6 +53,8 @@ export function Chat({
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [processingEvents, setProcessingEvents] = useState<ProcessingEvent[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -47,7 +65,7 @@ export function Chat({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, processingEvents]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -56,6 +74,36 @@ export function Chat({
       inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 150)}px`;
     }
   }, [input]);
+
+  // Parse SSE chunk properly
+  const parseSSEChunk = (chunk: string): { eventType: string | null; data: any }[] => {
+    const results: { eventType: string | null; data: any }[] = [];
+    const lines = chunk.split('\n');
+    let currentEventType: string | null = null;
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+
+      if (trimmedLine.startsWith('event:')) {
+        currentEventType = trimmedLine.replace('event:', '').trim();
+      } else if (trimmedLine.startsWith('data:')) {
+        try {
+          const jsonStr = trimmedLine.replace('data:', '').trim();
+          if (jsonStr) {
+            const data = JSON.parse(jsonStr);
+            // Use event type from the data if available, otherwise use the SSE event type
+            const eventType = data.event || currentEventType || 'unknown';
+            results.push({ eventType, data: { ...data, event: eventType } });
+          }
+        } catch (e) {
+          // Ignore parse errors for incomplete chunks
+        }
+        currentEventType = null; // Reset after processing data
+      }
+    }
+
+    return results;
+  };
 
   // Send message
   const sendMessage = useCallback(async () => {
@@ -73,6 +121,8 @@ export function Chat({
     setIsLoading(true);
     setIsStreaming(true);
     setStreamingContent('');
+    setProcessingEvents([]);
+    setIsProcessing(true);
 
     onProcessingStart?.();
 
@@ -98,62 +148,97 @@ export function Chat({
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let buffer = '';
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
 
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              const eventType = line.replace('event:', '').trim();
-              continue;
-            }
+          // Process complete SSE messages (separated by double newlines)
+          const messages = buffer.split('\n\n');
+          buffer = messages.pop() || ''; // Keep incomplete message in buffer
 
-            if (line.startsWith('data:')) {
-              try {
-                const data = JSON.parse(line.replace('data:', '').trim());
+          for (const message of messages) {
+            if (!message.trim()) continue;
 
-                // Emit event for progress tracker
-                const event = {
-                  event: data.event || 'unknown',
-                  data,
-                };
-                onProcessingEvent?.(event);
+            const parsedEvents = parseSSEChunk(message);
 
-                // Handle answer chunks (streaming text)
-                if (data.chunk) {
-                  fullContent += data.chunk;
+            for (const { eventType, data } of parsedEvents) {
+              // Create processing event
+              const event: ProcessingEvent = {
+                event: eventType || 'unknown',
+                data,
+              };
+
+              // Add to processing events for inline progress
+              setProcessingEvents((prev) => [...prev, event]);
+
+              // Also emit to parent for sidebar (if still needed)
+              onProcessingEvent?.(event);
+
+              // Handle answer chunks (streaming text)
+              if (data.chunk) {
+                fullContent += data.chunk;
+                setStreamingContent(fullContent);
+              }
+
+              // Handle complete event
+              if (eventType === 'complete' || data.success !== undefined) {
+                if (data.answer) {
+                  fullContent = data.answer;
                   setStreamingContent(fullContent);
                 }
-
-                // Handle complete event
-                if (data.success !== undefined) {
-                  if (data.answer) {
-                    fullContent = data.answer;
-                  }
-                }
-              } catch (e) {
-                // Ignore parse errors
+                setIsProcessing(false);
               }
+
+              // Handle error
+              if (eventType === 'error') {
+                setIsProcessing(false);
+              }
+            }
+          }
+        }
+
+        // Process any remaining buffer
+        if (buffer.trim()) {
+          const parsedEvents = parseSSEChunk(buffer);
+          for (const { eventType, data } of parsedEvents) {
+            const event: ProcessingEvent = {
+              event: eventType || 'unknown',
+              data,
+            };
+            setProcessingEvents((prev) => [...prev, event]);
+            onProcessingEvent?.(event);
+
+            if (data.chunk) {
+              fullContent += data.chunk;
+              setStreamingContent(fullContent);
+            }
+            if (data.answer) {
+              fullContent = data.answer;
             }
           }
         }
       }
 
-      // Add assistant message
-      if (fullContent) {
+      // Add assistant message with the final content
+      // Use functional update to get latest processingEvents
+      setMessages((prev) => {
+        // Don't add empty messages
+        if (!fullContent) return prev;
+
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           content: fullContent,
           timestamp: new Date(),
         };
-        setMessages((prev) => [...prev, assistantMessage]);
-      }
+        return [...prev, assistantMessage];
+      });
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {
@@ -167,6 +252,7 @@ export function Chat({
       setIsLoading(false);
       setIsStreaming(false);
       setStreamingContent('');
+      setIsProcessing(false);
       onProcessingEnd?.();
     }
   }, [input, isLoading, projectId, onProcessingStart, onProcessingEnd, onProcessingEvent]);
@@ -199,8 +285,20 @@ export function Chat({
           <MessageBubble key={message.id} message={message} />
         ))}
 
+        {/* Inline Progress (while processing) */}
+        {isProcessing && processingEvents.length > 0 && (
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20 shrink-0">
+              <Bot className="h-4 w-4 text-purple-400" />
+            </div>
+            <div className="flex-1 max-w-[85%]">
+              <InlineProgress events={processingEvents} isProcessing={isProcessing} />
+            </div>
+          </div>
+        )}
+
         {/* Streaming message */}
-        {isStreaming && streamingContent && (
+        {isStreaming && streamingContent && !isProcessing && (
           <MessageBubble
             message={{
               id: 'streaming',
@@ -212,15 +310,15 @@ export function Chat({
           />
         )}
 
-        {/* Loading indicator (before streaming starts) */}
-        {isLoading && !streamingContent && (
+        {/* Loading indicator (before any events) */}
+        {isLoading && processingEvents.length === 0 && !streamingContent && (
           <div className="flex items-start gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500/20">
               <Bot className="h-4 w-4 text-purple-400" />
             </div>
-            <div className="flex items-center gap-2 text-gray-400">
+            <div className="flex items-center gap-2 text-gray-400 bg-gray-800 rounded-lg px-4 py-3">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Thinking...</span>
+              <span className="text-sm">Starting AI processing...</span>
             </div>
           </div>
         )}
@@ -245,7 +343,7 @@ export function Chat({
           <button
             onClick={sendMessage}
             disabled={!input.trim() || isLoading}
-            className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? (
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -290,7 +388,7 @@ function MessageBubble({
 
       {/* Content */}
       <div
-        className={`max-w-[80%] rounded-lg px-4 py-3 ${
+        className={`max-w-[85%] rounded-lg px-4 py-3 ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-gray-800 text-gray-100'
