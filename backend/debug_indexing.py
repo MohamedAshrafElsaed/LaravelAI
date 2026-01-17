@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.core.config import settings
-from app.core.database import async_session_maker
+from app.core.database import async_session_factory
 from app.services.vector_store import VectorStore
 from app.services.embeddings import EmbeddingService, EmbeddingProvider
 from sqlalchemy import select, func
@@ -26,7 +26,7 @@ async def debug_project(project_id: str):
 
     # 1. Check database records
     print("[1] CHECKING DATABASE RECORDS...")
-    async with async_session_maker() as db:
+    async with async_session_factory() as db:
         # Get project
         stmt = select(Project).where(Project.id == project_id)
         result = await db.execute(stmt)
@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     if project_id == "list":
         async def list_projects():
-            async with async_session_maker() as db:
+            async with async_session_factory() as db:
                 stmt = select(Project.id, Project.name, Project.status, Project.indexed_files_count)
                 result = await db.execute(stmt)
                 projects = result.all()
