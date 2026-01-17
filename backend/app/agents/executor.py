@@ -382,6 +382,16 @@ class ExecutionResult:
     @classmethod
     def from_dict(cls, data: dict) -> "ExecutionResult":
         """Create from dictionary."""
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(file="", action="modify", content="", success=False, error=data)
+
+        if not isinstance(data, dict):
+            return cls(file="", action="modify", content="", success=False, error=str(data))
+
         return cls(
             file=data.get("file", ""),
             action=data.get("action", "modify"),

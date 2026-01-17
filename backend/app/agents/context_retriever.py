@@ -189,6 +189,11 @@ class ContextRetriever:
                 logger.info(f"[CONTEXT_RETRIEVER] Query '{query}' returned {len(results)} results")
 
                 for result in results:
+                    # Defensive check - ensure result is a dict
+                    if not isinstance(result, dict):
+                        logger.warning(f"[CONTEXT_RETRIEVER] Skipping non-dict result: {type(result)}")
+                        continue
+
                     chunk = CodeChunk(
                         file_path=result.get("file_path", "unknown"),
                         content=result.get("content", ""),
@@ -196,7 +201,7 @@ class ContextRetriever:
                         start_line=result.get("start_line", 0),
                         end_line=result.get("end_line", 0),
                         score=result.get("score", 0.0),
-                        metadata=result.get("metadata", {}),
+                        metadata=result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {},
                     )
 
                     # Check token budget

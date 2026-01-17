@@ -277,6 +277,16 @@ class ValidationIssue:
     @classmethod
     def from_dict(cls, data: dict) -> "ValidationIssue":
         """Create from dictionary."""
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(severity="info", file="", message=data)
+
+        if not isinstance(data, dict):
+            return cls(severity="info", file="", message=str(data))
+
         return cls(
             severity=data.get("severity", "info"),
             file=data.get("file", ""),
@@ -308,12 +318,31 @@ class ValidationResult:
     @classmethod
     def from_dict(cls, data: dict) -> "ValidationResult":
         """Create from dictionary."""
-        issues = [ValidationIssue.from_dict(i) for i in data.get("issues", [])]
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(approved=False, score=0, summary=data)
+
+        if not isinstance(data, dict):
+            return cls(approved=False, score=0, summary=str(data))
+
+        issues_data = data.get("issues", [])
+        if not isinstance(issues_data, list):
+            issues_data = []
+
+        issues = [ValidationIssue.from_dict(i) for i in issues_data]
+
+        suggestions = data.get("suggestions", [])
+        if not isinstance(suggestions, list):
+            suggestions = []
+
         return cls(
             approved=data.get("approved", False),
             score=data.get("score", 0),
             issues=issues,
-            suggestions=data.get("suggestions", []),
+            suggestions=suggestions,
             summary=data.get("summary", ""),
         )
 

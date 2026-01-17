@@ -193,6 +193,17 @@ class PlanStep:
     @classmethod
     def from_dict(cls, data: dict) -> "PlanStep":
         """Create from dictionary."""
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            # Try to parse as JSON if it's a string
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(order=0, action="modify", file="", description=data)
+
+        if not isinstance(data, dict):
+            return cls(order=0, action="modify", file="", description=str(data))
+
         return cls(
             order=data.get("order", 0),
             action=data.get("action", "modify"),
@@ -218,7 +229,21 @@ class Plan:
     @classmethod
     def from_dict(cls, data: dict) -> "Plan":
         """Create from dictionary."""
-        steps = [PlanStep.from_dict(s) for s in data.get("steps", [])]
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(summary=data, steps=[])
+
+        if not isinstance(data, dict):
+            return cls(summary=str(data), steps=[])
+
+        steps_data = data.get("steps", [])
+        if not isinstance(steps_data, list):
+            steps_data = []
+
+        steps = [PlanStep.from_dict(s) for s in steps_data]
         return cls(
             summary=data.get("summary", ""),
             steps=sorted(steps, key=lambda s: s.order),

@@ -144,13 +144,23 @@ class Intent:
     @classmethod
     def from_dict(cls, data: dict) -> "Intent":
         """Create from dictionary."""
+        # Defensive check - ensure data is a dict
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return cls(task_type="question", search_queries=[data[:50]])
+
+        if not isinstance(data, dict):
+            return cls(task_type="question", search_queries=[str(data)[:50]])
+
         return cls(
             task_type=data.get("task_type", "question"),
-            domains_affected=data.get("domains_affected", []),
+            domains_affected=data.get("domains_affected", []) if isinstance(data.get("domains_affected"), list) else [],
             scope=data.get("scope", "single_file"),
-            languages=data.get("languages", ["php"]),
+            languages=data.get("languages", ["php"]) if isinstance(data.get("languages"), list) else ["php"],
             requires_migration=data.get("requires_migration", False),
-            search_queries=data.get("search_queries", []),
+            search_queries=data.get("search_queries", []) if isinstance(data.get("search_queries"), list) else [],
         )
 
 
