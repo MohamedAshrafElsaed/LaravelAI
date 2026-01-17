@@ -69,6 +69,33 @@ async def debug_project(project_id: str):
         for f in files:
             print(f"      - {f[0]} ({f[1] or 0} chars)")
 
+        # Check for files WITH content
+        stmt = select(func.count(IndexedFile.id)).where(
+            IndexedFile.project_id == project_id,
+            func.length(IndexedFile.content) > 0
+        )
+        result = await db.execute(stmt)
+        files_with_content = result.scalar()
+        print(f"\n   Files WITH content: {files_with_content} / {indexed_count}")
+
+        if files_with_content == 0:
+            print(f"\n   ❌ CRITICAL: All indexed files have EMPTY content!")
+            print(f"   This means the indexer stored file paths but NOT file content.")
+            print(f"   → Vector embeddings cannot be created without content.")
+            print(f"   → You need to re-index the project to store file content.")
+
+        # Show sample files WITH content
+        if files_with_content > 0:
+            print(f"\n   Sample files WITH content:")
+            stmt = select(IndexedFile.file_path, func.length(IndexedFile.content)).where(
+                IndexedFile.project_id == project_id,
+                func.length(IndexedFile.content) > 0
+            ).order_by(func.length(IndexedFile.content).desc()).limit(5)
+            result = await db.execute(stmt)
+            files = result.all()
+            for f in files:
+                print(f"      - {f[0]} ({f[1]} chars)")
+
     # 2. Check Qdrant vector store
     print(f"\n[2] CHECKING QDRANT VECTOR STORE...")
     try:
@@ -76,24 +103,54 @@ async def debug_project(project_id: str):
         print(f"   ✓ Connected to Qdrant at {vector_store.url}")
 
         # Check if collection exists
+        collection_name = vector_store._get_collection_name(project_id)
         if vector_store.collection_exists(project_id):
-            info = vector_store.get_collection_info(project_id)
-            print(f"   ✓ Collection exists:")
-            print(f"     - Name: {info['name']}")
-            print(f"     - Points count: {info['points_count']}")
-            print(f"     - Vectors count: {info['vectors_count']}")
-            print(f"     - Status: {info['status']}")
-            print(f"     - Dimension: {info['dimension']}")
+            print(f"   ✓ Collection exists: {collection_name}")
 
-            if info['points_count'] == 0:
-                print(f"\n   ❌ Collection exists but has 0 vectors!")
-                print(f"   → This means embeddings were not stored properly")
+            # Try to get basic info directly from client to avoid parsing issues
+            try:
+                info = vector_store.get_collection_info(project_id)
+                print(f"     - Points count: {info['points_count']}")
+                print(f"     - Vectors count: {info['vectors_count']}")
+                print(f"     - Status: {info['status']}")
+                print(f"     - Dimension: {info['dimension']}")
+
+                if info['points_count'] == 0:
+                    print(f"\n   ❌ Collection exists but has 0 vectors!")
+                    print(f"   → This means embeddings were not stored properly")
+            except Exception as parse_err:
+                # Fallback: try scroll to count points
+                print(f"   ⚠️ Could not parse collection info (client/server version mismatch)")
+                print(f"   Trying alternative count method...")
+                try:
+                    # Use scroll to check if there are any points
+                    scroll_result = vector_store.client.scroll(
+                        collection_name=collection_name,
+                        limit=1,
+                        with_payload=False,
+                        with_vectors=False,
+                    )
+                    points, next_page = scroll_result
+                    if points:
+                        print(f"   ✓ Collection has vectors (at least 1 found)")
+                        # Try to count using count API
+                        try:
+                            count_result = vector_store.client.count(collection_name=collection_name)
+                            print(f"     - Points count: {count_result.count}")
+                        except:
+                            print(f"     - Points count: unknown (count API failed)")
+                    else:
+                        print(f"   ❌ Collection exists but appears empty!")
+                except Exception as scroll_err:
+                    print(f"   ❌ Could not check collection: {scroll_err}")
         else:
             print(f"   ❌ No Qdrant collection found for project!")
             print(f"   → Embeddings have not been created")
 
     except Exception as e:
         print(f"   ❌ Qdrant error: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
     # 3. Test embedding generation
