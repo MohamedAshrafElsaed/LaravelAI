@@ -6,7 +6,7 @@ for assistant messages, enabling complete history replay.
 """
 import asyncio
 from sqlalchemy import text
-from app.core.database import async_engine
+from app.core.database import engine as async_engine
 
 
 async def run_migration():
