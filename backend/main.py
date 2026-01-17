@@ -43,6 +43,7 @@ def setup_logging():
     logging.getLogger("app").setLevel(log_level)
     logging.getLogger("app.services").setLevel(log_level)
     logging.getLogger("app.api").setLevel(log_level)
+    logging.getLogger("app.agents").setLevel(log_level)
 
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -102,8 +103,9 @@ app.include_router(
 app.include_router(
     github.router, prefix=f"{settings.api_prefix}/github", tags=["GitHub"]
 )
+# Chat routes under /projects/{id}/chat
 app.include_router(
-    chat.router, prefix=f"{settings.api_prefix}/chat", tags=["Chat"]
+    chat.router, prefix=f"{settings.api_prefix}/projects", tags=["Chat"]
 )
 
 if __name__ == "__main__":
