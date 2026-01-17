@@ -14,7 +14,7 @@ from sqlalchemy import select, desc
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, decrypt_token
 from app.models.models import (
     Project, User, Conversation, Message, GitChange, GitChangeStatus
 )
@@ -401,7 +401,7 @@ async def rollback_change(
     rollback_commit = None
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Perform rollback based on status
         if change.status in [GitChangeStatus.APPLIED.value, GitChangeStatus.PUSHED.value, GitChangeStatus.PR_CREATED.value]:
@@ -563,7 +563,7 @@ async def apply_change(
         )
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Create the branch
         git_service.create_branch(
@@ -639,7 +639,7 @@ async def push_change(
         )
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Checkout the branch
         git_service.checkout_branch(project.clone_path, change.branch_name)
@@ -695,7 +695,7 @@ async def create_pr_for_change(
     # If not pushed yet, push first
     if change.status == GitChangeStatus.APPLIED.value:
         try:
-            git_service = GitService(current_user.github_access_token)
+            git_service = GitService(decrypt_token(current_user.github_access_token))
             git_service.checkout_branch(project.clone_path, change.branch_name)
             git_service.push_branch(project.clone_path, change.branch_name)
             change.status = GitChangeStatus.PUSHED.value
@@ -707,7 +707,7 @@ async def create_pr_for_change(
             )
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Get files changed for PR body
         files_changed = [f["file"] for f in (change.files_changed or [])]

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, decrypt_token
 from app.models.models import Project, User, ProjectStatus
 from app.services.git_service import GitService, GitServiceError
 
@@ -139,7 +139,7 @@ async def list_branches(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
         branches = git_service.list_branches(project.clone_path)
 
         return [
@@ -181,7 +181,7 @@ async def apply_changes(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Generate branch name if not provided
         branch_name = request.branch_name or generate_branch_name()
@@ -250,7 +250,7 @@ async def create_pull_request(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # Get base branch
         base_branch = request.base_branch or project.default_branch or "main"
@@ -315,7 +315,7 @@ async def sync_with_remote(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         # First checkout the default branch
         default_branch = project.default_branch or "main"
@@ -363,7 +363,7 @@ async def reset_to_remote(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         branch_name = branch or project.default_branch or "main"
         git_service.reset_to_remote(project.clone_path, branch_name)
@@ -401,7 +401,7 @@ async def get_diff(
     project = await get_project_with_clone(project_id, current_user, db)
 
     try:
-        git_service = GitService(current_user.github_access_token)
+        git_service = GitService(decrypt_token(current_user.github_access_token))
 
         base = base_branch or project.default_branch or "main"
         current_branch = git_service.get_current_branch(project.clone_path)
