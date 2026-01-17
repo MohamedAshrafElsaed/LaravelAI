@@ -5,7 +5,7 @@ Provides endpoints for tracking, listing, and managing git changes per conversat
 Includes rollback functionality for reverting changes.
 """
 import logging
-from typing import List, Optional
+from typing import List, Optional, Callable, Any
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,6 +19,11 @@ from app.models.models import (
     Project, User, Conversation, Message, GitChange, GitChangeStatus
 )
 from app.services.git_service import GitService, GitServiceError
+from app.services.github_token_service import (
+    ensure_valid_token,
+    handle_auth_failure,
+    TokenInvalidError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +154,95 @@ async def get_git_change(
             detail="Git change not found",
         )
     return change
+
+
+async def get_valid_git_service(
+    user: User,
+    db: AsyncSession,
+) -> GitService:
+    """Get a GitService with a validated token, refreshing if necessary."""
+    try:
+        token = await ensure_valid_token(user, db)
+        return GitService(token)
+    except TokenInvalidError as e:
+        logger.error(f"[GIT CHANGES API] Token invalid for user {user.username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"X-Token-Refresh-Required": "true"},
+        )
+
+
+async def execute_with_token_refresh(
+    user: User,
+    db: AsyncSession,
+    operation: Callable[[GitService], Any],
+    operation_name: str = "Git operation",
+) -> Any:
+    """Execute a git operation with automatic token refresh on auth failure."""
+    try:
+        git_service = await get_valid_git_service(user, db)
+        return operation(git_service)
+    except GitServiceError as e:
+        error_str = str(e).lower()
+        if "authentication failed" in error_str or "token" in error_str:
+            logger.warning(f"[GIT CHANGES API] Auth failure during {operation_name}, attempting token refresh")
+            new_token = await handle_auth_failure(user, db)
+            if new_token:
+                logger.info(f"[GIT CHANGES API] Token refreshed, retrying {operation_name}")
+                try:
+                    git_service = GitService(new_token)
+                    return operation(git_service)
+                except GitServiceError as retry_error:
+                    logger.error(f"[GIT CHANGES API] {operation_name} failed after token refresh: {retry_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(retry_error),
+                    )
+            else:
+                logger.error(f"[GIT CHANGES API] Token refresh failed, cannot recover")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub authentication failed. Please re-authenticate with GitHub.",
+                    headers={"X-Token-Refresh-Required": "true"},
+                )
+        raise
+
+
+async def execute_async_with_token_refresh(
+    user: User,
+    db: AsyncSession,
+    operation: Callable[[GitService], Any],
+    operation_name: str = "Git operation",
+) -> Any:
+    """Execute an async git operation with automatic token refresh on auth failure."""
+    try:
+        git_service = await get_valid_git_service(user, db)
+        return await operation(git_service)
+    except GitServiceError as e:
+        error_str = str(e).lower()
+        if "authentication failed" in error_str or "token" in error_str:
+            logger.warning(f"[GIT CHANGES API] Auth failure during {operation_name}, attempting token refresh")
+            new_token = await handle_auth_failure(user, db)
+            if new_token:
+                logger.info(f"[GIT CHANGES API] Token refreshed, retrying {operation_name}")
+                try:
+                    git_service = GitService(new_token)
+                    return await operation(git_service)
+                except GitServiceError as retry_error:
+                    logger.error(f"[GIT CHANGES API] {operation_name} failed after token refresh: {retry_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(retry_error),
+                    )
+            else:
+                logger.error(f"[GIT CHANGES API] Token refresh failed, cannot recover")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub authentication failed. Please re-authenticate with GitHub.",
+                    headers={"X-Token-Refresh-Required": "true"},
+                )
+        raise
 
 
 def change_to_response(change: GitChange) -> GitChangeResponse:
@@ -398,40 +492,43 @@ async def rollback_change(
         )
 
     previous_status = change.status
-    rollback_commit = None
+
+    # Handle pending changes - no git operations needed
+    if change.status == GitChangeStatus.PENDING.value:
+        change.status = GitChangeStatus.DISCARDED.value
+        await db.commit()
+        await db.refresh(change)
+        return RollbackResponse(
+            success=True,
+            message="Pending changes discarded",
+            previous_status=previous_status,
+        )
+
+    def do_rollback(git_service: GitService) -> str:
+        """Perform rollback and return rollback commit hash."""
+        # Checkout base branch
+        git_service.checkout_branch(project.clone_path, change.base_branch)
+
+        # Try to delete the feature branch locally
+        try:
+            repo = git_service._get_repo(project.clone_path)
+            if change.branch_name in [b.name for b in repo.branches]:
+                repo.delete_head(change.branch_name, force=True)
+                logger.info(f"[GIT CHANGES API] Deleted local branch: {change.branch_name}")
+        except Exception as e:
+            logger.warning(f"[GIT CHANGES API] Could not delete branch: {e}")
+
+        # Get current commit as rollback reference
+        repo = git_service._get_repo(project.clone_path)
+        return repo.head.commit.hexsha
 
     try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
-        # Perform rollback based on status
-        if change.status in [GitChangeStatus.APPLIED.value, GitChangeStatus.PUSHED.value, GitChangeStatus.PR_CREATED.value]:
-            # Checkout base branch
-            git_service.checkout_branch(project.clone_path, change.base_branch)
-
-            # Try to delete the feature branch locally
-            try:
-                repo = git_service._get_repo(project.clone_path)
-                if change.branch_name in [b.name for b in repo.branches]:
-                    repo.delete_head(change.branch_name, force=True)
-                    logger.info(f"[GIT CHANGES API] Deleted local branch: {change.branch_name}")
-            except Exception as e:
-                logger.warning(f"[GIT CHANGES API] Could not delete branch: {e}")
-
-            # Get current commit as rollback reference
-            repo = git_service._get_repo(project.clone_path)
-            rollback_commit = repo.head.commit.hexsha
-
-        elif change.status == GitChangeStatus.PENDING.value:
-            # Just mark as discarded, no git operations needed
-            change.status = GitChangeStatus.DISCARDED.value
-            await db.commit()
-            await db.refresh(change)
-
-            return RollbackResponse(
-                success=True,
-                message="Pending changes discarded",
-                previous_status=previous_status,
-            )
+        rollback_commit = await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_rollback,
+            operation_name="rollback change",
+        )
 
         # Update the change record
         change.status = GitChangeStatus.ROLLED_BACK.value
@@ -562,9 +659,18 @@ async def apply_change(
             detail="No file changes to apply",
         )
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
+    # Prepare changes to apply
+    changes_to_apply = [
+        {
+            "file": f["file"],
+            "action": f["action"],
+            "content": f.get("content", ""),
+        }
+        for f in change.files_changed
+    ]
+    commit_message = change.title or f"AI changes: {len(changes_to_apply)} file(s) modified"
 
+    def do_apply(git_service: GitService) -> str:
         # Create the branch
         git_service.create_branch(
             clone_path=project.clone_path,
@@ -572,23 +678,21 @@ async def apply_change(
             from_branch=change.base_branch,
         )
 
-        # Apply changes
-        changes_to_apply = [
-            {
-                "file": f["file"],
-                "action": f["action"],
-                "content": f.get("content", ""),
-            }
-            for f in change.files_changed
-        ]
-
-        commit_message = change.title or f"AI changes: {len(changes_to_apply)} file(s) modified"
-        commit_hash = git_service.apply_changes(
+        # Apply changes and return commit hash
+        return git_service.apply_changes(
             clone_path=project.clone_path,
             changes=changes_to_apply,
             commit_message=commit_message,
             author_name=current_user.username,
             author_email=current_user.email or f"{current_user.username}@users.noreply.github.com",
+        )
+
+    try:
+        commit_hash = await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_apply,
+            operation_name="apply change",
         )
 
         # Update change record
@@ -638,16 +742,21 @@ async def push_change(
             detail=f"Can only push applied changes. Current status: {change.status}",
         )
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
+    def do_push(git_service: GitService) -> None:
         # Checkout the branch
         git_service.checkout_branch(project.clone_path, change.branch_name)
-
         # Push to remote
         git_service.push_branch(
             clone_path=project.clone_path,
             branch_name=change.branch_name,
+        )
+
+    try:
+        await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_push,
+            operation_name="push change",
         )
 
         # Update change record
@@ -692,12 +801,24 @@ async def create_pr_for_change(
             detail=f"Change must be pushed first. Current status: {change.status}",
         )
 
+    # Get files changed for PR body
+    files_changed = [f["file"] for f in (change.files_changed or [])]
+    pr_title = title or change.title or f"AI changes from {change.branch_name}"
+    pr_description = description or change.description or ""
+
     # If not pushed yet, push first
     if change.status == GitChangeStatus.APPLIED.value:
-        try:
-            git_service = GitService(decrypt_token(current_user.github_access_token))
+        def do_push(git_service: GitService) -> None:
             git_service.checkout_branch(project.clone_path, change.branch_name)
             git_service.push_branch(project.clone_path, change.branch_name)
+
+        try:
+            await execute_with_token_refresh(
+                user=current_user,
+                db=db,
+                operation=do_push,
+                operation_name="push branch before PR",
+            )
             change.status = GitChangeStatus.PUSHED.value
             change.pushed_at = datetime.utcnow()
         except GitServiceError as e:
@@ -706,17 +827,8 @@ async def create_pr_for_change(
                 detail=f"Failed to push branch: {str(e)}",
             )
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
-        # Get files changed for PR body
-        files_changed = [f["file"] for f in (change.files_changed or [])]
-
-        # Create PR
-        pr_title = title or change.title or f"AI changes from {change.branch_name}"
-        pr_description = description or change.description or ""
-
-        pr_data = await git_service.create_pull_request(
+    async def do_create_pr(git_service: GitService) -> dict:
+        return await git_service.create_pull_request(
             repo_full_name=project.repo_full_name,
             branch_name=change.branch_name,
             base_branch=change.base_branch,
@@ -724,6 +836,14 @@ async def create_pr_for_change(
             description=pr_description,
             files_changed=files_changed,
             ai_summary=change.change_summary or f"Modified {len(files_changed)} file(s)",
+        )
+
+    try:
+        pr_data = await execute_async_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_create_pr,
+            operation_name="create PR",
         )
 
         # Update change record

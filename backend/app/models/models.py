@@ -56,6 +56,10 @@ class User(Base):
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     github_access_token: Mapped[str] = mapped_column(String(500))  # Encrypted token
 
+    # GitHub token refresh (for OAuth apps with token expiration enabled)
+    github_refresh_token: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Encrypted
+    github_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Subscription/limits
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     monthly_requests: Mapped[int] = mapped_column(Integer, default=0)

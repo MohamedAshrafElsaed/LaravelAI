@@ -4,7 +4,7 @@ Git operations API endpoints.
 Provides endpoints for branch management, applying changes, and creating pull requests.
 """
 import logging
-from typing import List, Optional
+from typing import List, Optional, Callable, Any
 from datetime import datetime
 from uuid import uuid4
 
@@ -17,6 +17,11 @@ from app.core.database import get_db
 from app.core.security import get_current_user, decrypt_token
 from app.models.models import Project, User, ProjectStatus
 from app.services.git_service import GitService, GitServiceError
+from app.services.github_token_service import (
+    ensure_valid_token,
+    handle_auth_failure,
+    TokenInvalidError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,143 @@ def generate_branch_name(prefix: str = "ai-changes") -> str:
     return f"{prefix}/{timestamp}-{short_id}"
 
 
+async def get_valid_git_service(
+    user: User,
+    db: AsyncSession,
+) -> GitService:
+    """
+    Get a GitService with a validated token, refreshing if necessary.
+
+    Args:
+        user: The current user
+        db: Database session
+
+    Returns:
+        GitService with valid token
+
+    Raises:
+        HTTPException: If token is invalid and cannot be refreshed
+    """
+    try:
+        token = await ensure_valid_token(user, db)
+        return GitService(token)
+    except TokenInvalidError as e:
+        logger.error(f"[GIT API] Token invalid for user {user.username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"X-Token-Refresh-Required": "true"},
+        )
+
+
+async def execute_with_token_refresh(
+    user: User,
+    db: AsyncSession,
+    operation: Callable[[GitService], Any],
+    operation_name: str = "Git operation",
+) -> Any:
+    """
+    Execute a git operation with automatic token refresh on auth failure.
+
+    Args:
+        user: The current user
+        db: Database session
+        operation: Function that takes GitService and performs the operation
+        operation_name: Name of operation for logging
+
+    Returns:
+        Result of the operation
+
+    Raises:
+        HTTPException: If operation fails after retry
+    """
+    try:
+        # First attempt with current token
+        git_service = await get_valid_git_service(user, db)
+        return operation(git_service)
+
+    except GitServiceError as e:
+        error_str = str(e).lower()
+
+        # Check if it's an auth error that might be recoverable
+        if "authentication failed" in error_str or "token" in error_str:
+            logger.warning(f"[GIT API] Auth failure during {operation_name}, attempting token refresh")
+
+            # Try to refresh the token
+            new_token = await handle_auth_failure(user, db)
+
+            if new_token:
+                logger.info(f"[GIT API] Token refreshed, retrying {operation_name}")
+                try:
+                    git_service = GitService(new_token)
+                    return operation(git_service)
+                except GitServiceError as retry_error:
+                    logger.error(f"[GIT API] {operation_name} failed after token refresh: {retry_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(retry_error),
+                    )
+            else:
+                logger.error(f"[GIT API] Token refresh failed, cannot recover")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub authentication failed. Please re-authenticate with GitHub.",
+                    headers={"X-Token-Refresh-Required": "true"},
+                )
+
+        # Not an auth error, re-raise
+        raise
+
+
+async def execute_async_with_token_refresh(
+    user: User,
+    db: AsyncSession,
+    operation: Callable[[GitService], Any],
+    operation_name: str = "Git operation",
+) -> Any:
+    """
+    Execute an async git operation with automatic token refresh on auth failure.
+
+    Similar to execute_with_token_refresh but for async operations.
+    """
+    try:
+        # First attempt with current token
+        git_service = await get_valid_git_service(user, db)
+        return await operation(git_service)
+
+    except GitServiceError as e:
+        error_str = str(e).lower()
+
+        # Check if it's an auth error that might be recoverable
+        if "authentication failed" in error_str or "token" in error_str:
+            logger.warning(f"[GIT API] Auth failure during {operation_name}, attempting token refresh")
+
+            # Try to refresh the token
+            new_token = await handle_auth_failure(user, db)
+
+            if new_token:
+                logger.info(f"[GIT API] Token refreshed, retrying {operation_name}")
+                try:
+                    git_service = GitService(new_token)
+                    return await operation(git_service)
+                except GitServiceError as retry_error:
+                    logger.error(f"[GIT API] {operation_name} failed after token refresh: {retry_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(retry_error),
+                    )
+            else:
+                logger.error(f"[GIT API] Token refresh failed, cannot recover")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub authentication failed. Please re-authenticate with GitHub.",
+                    headers={"X-Token-Refresh-Required": "true"},
+                )
+
+        # Not an auth error, re-raise
+        raise
+
+
 # ============== API Endpoints ==============
 
 @router.get("/{project_id}/branches", response_model=List[BranchInfo])
@@ -133,15 +275,14 @@ async def list_branches(
     List all branches in the project repository.
 
     Returns local and remote branches with their latest commit info.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] GET /projects/{project_id}/branches - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
+    def do_list_branches(git_service: GitService) -> List[BranchInfo]:
         branches = git_service.list_branches(project.clone_path)
-
         return [
             BranchInfo(
                 name=b["name"],
@@ -154,6 +295,14 @@ async def list_branches(
             )
             for b in branches
         ]
+
+    try:
+        return await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_list_branches,
+            operation_name="list branches",
+        )
 
     except GitServiceError as e:
         logger.error(f"[GIT API] Failed to list branches: {str(e)}")
@@ -175,20 +324,19 @@ async def apply_changes(
 
     Creates a new branch, applies file changes, and commits them.
     The branch is NOT pushed automatically - use /pr to push and create PR.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] POST /projects/{project_id}/apply - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
+    # Generate branch name if not provided
+    branch_name = request.branch_name or generate_branch_name()
 
-        # Generate branch name if not provided
-        branch_name = request.branch_name or generate_branch_name()
+    # Get base branch (default to main/master)
+    base_branch = request.base_branch or project.default_branch or "main"
 
-        # Get base branch (default to main/master)
-        base_branch = request.base_branch or project.default_branch or "main"
-
+    def do_apply_changes(git_service: GitService) -> ApplyChangesResponse:
         logger.info(f"[GIT API] Creating branch '{branch_name}' from '{base_branch}'")
 
         # Create the new branch
@@ -225,6 +373,14 @@ async def apply_changes(
             message=f"Applied {len(changes)} changes to branch '{branch_name}'",
         )
 
+    try:
+        return await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_apply_changes,
+            operation_name="apply changes",
+        )
+
     except GitServiceError as e:
         logger.error(f"[GIT API] Failed to apply changes: {str(e)}")
         raise HTTPException(
@@ -244,17 +400,16 @@ async def create_pull_request(
     Push branch and create a pull request.
 
     Pushes the specified branch to GitHub and creates a PR to merge into base branch.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] POST /projects/{project_id}/pr - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
+    # Get base branch
+    base_branch = request.base_branch or project.default_branch or "main"
 
-        # Get base branch
-        base_branch = request.base_branch or project.default_branch or "main"
-
+    async def do_push_and_create_pr(git_service: GitService) -> PRResponse:
         # Checkout the branch to push
         git_service.checkout_branch(project.clone_path, request.branch_name)
 
@@ -266,7 +421,6 @@ async def create_pull_request(
         )
 
         # Get list of changed files
-        diff = git_service.get_diff(project.clone_path, base_branch)
         changed_files = git_service.get_changed_files(project.clone_path, base_branch)
 
         # Create the PR
@@ -291,6 +445,14 @@ async def create_pull_request(
             created_at=pr_data["created_at"],
         )
 
+    try:
+        return await execute_async_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_push_and_create_pr,
+            operation_name="push and create PR",
+        )
+
     except GitServiceError as e:
         logger.error(f"[GIT API] Failed to create PR: {str(e)}")
         raise HTTPException(
@@ -309,16 +471,15 @@ async def sync_with_remote(
     Pull latest changes from remote repository.
 
     Fetches and merges changes from the remote's default branch.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] POST /projects/{project_id}/sync - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
+    default_branch = project.default_branch or "main"
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
+    def do_sync(git_service: GitService) -> SyncResponse:
         # First checkout the default branch
-        default_branch = project.default_branch or "main"
         try:
             git_service.checkout_branch(project.clone_path, default_branch)
         except GitServiceError:
@@ -335,6 +496,14 @@ async def sync_with_remote(
             success=True,
             message=message,
             had_changes=had_changes,
+        )
+
+    try:
+        return await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_sync,
+            operation_name="sync with remote",
         )
 
     except GitServiceError as e:
@@ -357,24 +526,29 @@ async def reset_to_remote(
 
     Discards all local changes and resets to the remote branch state.
     Use with caution - this will lose uncommitted work.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] POST /projects/{project_id}/reset - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
+    branch_name = branch or project.default_branch or "main"
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
-        branch_name = branch or project.default_branch or "main"
+    def do_reset(git_service: GitService) -> dict:
         git_service.reset_to_remote(project.clone_path, branch_name)
-
         logger.info(f"[GIT API] Reset to remote/{branch_name} complete")
-
         return {
             "success": True,
             "message": f"Reset to origin/{branch_name} complete",
             "branch": branch_name,
         }
+
+    try:
+        return await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_reset,
+            operation_name="reset to remote",
+        )
 
     except GitServiceError as e:
         logger.error(f"[GIT API] Reset failed: {str(e)}")
@@ -395,19 +569,17 @@ async def get_diff(
     Get the diff between current branch and base branch.
 
     Returns unified diff format showing all changes.
+    Automatically refreshes the GitHub token if it has expired.
     """
     logger.info(f"[GIT API] GET /projects/{project_id}/diff - user_id={current_user.id}")
 
     project = await get_project_with_clone(project_id, current_user, db)
+    base = base_branch or project.default_branch or "main"
 
-    try:
-        git_service = GitService(decrypt_token(current_user.github_access_token))
-
-        base = base_branch or project.default_branch or "main"
+    def do_get_diff(git_service: GitService) -> dict:
         current_branch = git_service.get_current_branch(project.clone_path)
         diff = git_service.get_diff(project.clone_path, base)
         changed_files = git_service.get_changed_files(project.clone_path, base)
-
         return {
             "current_branch": current_branch,
             "base_branch": base,
@@ -415,6 +587,14 @@ async def get_diff(
             "files_changed": changed_files,
             "file_count": len(changed_files),
         }
+
+    try:
+        return await execute_with_token_refresh(
+            user=current_user,
+            db=db,
+            operation=do_get_diff,
+            operation_name="get diff",
+        )
 
     except GitServiceError as e:
         logger.error(f"[GIT API] Failed to get diff: {str(e)}")

@@ -1,4 +1,5 @@
 """GitHub OAuth authentication routes."""
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
 from pydantic import BaseModel
+import logging
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -16,6 +18,8 @@ from app.core.security import (
     get_current_user,
 )
 from app.models.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -109,6 +113,15 @@ async def github_callback(
                 detail=f"GitHub OAuth error: {error}",
             )
 
+        # Extract refresh token and expiration if available
+        # (requires token expiration enabled on GitHub OAuth app)
+        github_refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in")  # Seconds until expiration
+        token_expires_at = None
+        if expires_in:
+            token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+            logger.info(f"[AUTH] Token will expire in {expires_in} seconds")
+
         # Get user info from GitHub
         user_response = await client.get(
             "https://api.github.com/user",
@@ -141,6 +154,7 @@ async def github_callback(
 
     # Encrypt the GitHub token before storage
     encrypted_token = encrypt_token(github_token)
+    encrypted_refresh_token = encrypt_token(github_refresh_token) if github_refresh_token else None
 
     # Find or create user
     stmt = select(User).where(User.github_id == github_user["id"])
@@ -154,6 +168,10 @@ async def github_callback(
         user.username = github_user["login"]  # Username might change
         if primary_email:
             user.email = primary_email
+        # Update refresh token and expiration
+        if encrypted_refresh_token:
+            user.github_refresh_token = encrypted_refresh_token
+        user.github_token_expires_at = token_expires_at
     else:
         # Create new user
         user = User(
@@ -162,6 +180,8 @@ async def github_callback(
             email=primary_email,
             avatar_url=github_user.get("avatar_url"),
             github_access_token=encrypted_token,
+            github_refresh_token=encrypted_refresh_token,
+            github_token_expires_at=token_expires_at,
         )
         db.add(user)
 
@@ -216,6 +236,15 @@ async def github_callback_post(
                 detail=f"GitHub OAuth error: {error}",
             )
 
+        # Extract refresh token and expiration if available
+        # (requires token expiration enabled on GitHub OAuth app)
+        github_refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in")  # Seconds until expiration
+        token_expires_at = None
+        if expires_in:
+            token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+            logger.info(f"[AUTH] Token will expire in {expires_in} seconds")
+
         # Get user info from GitHub
         user_response = await client.get(
             "https://api.github.com/user",
@@ -248,6 +277,7 @@ async def github_callback_post(
 
     # Encrypt the GitHub token before storage
     encrypted_token = encrypt_token(github_token)
+    encrypted_refresh_token = encrypt_token(github_refresh_token) if github_refresh_token else None
 
     # Find or create user
     stmt = select(User).where(User.github_id == github_user["id"])
@@ -261,6 +291,10 @@ async def github_callback_post(
         user.username = github_user["login"]
         if primary_email:
             user.email = primary_email
+        # Update refresh token and expiration
+        if encrypted_refresh_token:
+            user.github_refresh_token = encrypted_refresh_token
+        user.github_token_expires_at = token_expires_at
     else:
         # Create new user
         user = User(
@@ -269,6 +303,8 @@ async def github_callback_post(
             email=primary_email,
             avatar_url=github_user.get("avatar_url"),
             github_access_token=encrypted_token,
+            github_refresh_token=encrypted_refresh_token,
+            github_token_expires_at=token_expires_at,
         )
         db.add(user)
 
