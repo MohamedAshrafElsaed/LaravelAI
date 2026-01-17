@@ -3,17 +3,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  Panel,
-  Group as PanelGroup,
-  Separator as PanelResizeHandle,
-} from 'react-resizable-panels';
-import {
   RefreshCw,
   GitBranch,
   ArrowLeft,
   MessageSquare,
   Code,
   FileText,
+  PanelLeftClose,
+  PanelLeft,
+  Folder,
 } from 'lucide-react';
 
 import { projectsApi } from '@/lib/api';
@@ -50,11 +48,17 @@ export default function ProjectPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedFileContent, setSelectedFileContent] = useState<string>('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   // AI processing state
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingEvents, setProcessingEvents] = useState<any[]>([]);
   const [executionResults, setExecutionResults] = useState<any[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Fetch project
   const fetchProject = useCallback(async () => {
@@ -69,12 +73,14 @@ export default function ProjectPage() {
   }, [projectId]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (mounted && !isAuthenticated) {
       router.push('/');
       return;
     }
-    fetchProject();
-  }, [isAuthenticated, router, fetchProject]);
+    if (mounted) {
+      fetchProject();
+    }
+  }, [mounted, isAuthenticated, router, fetchProject]);
 
   // Sync project (re-clone and re-index)
   const handleSync = async () => {
@@ -95,6 +101,10 @@ export default function ProjectPage() {
     setSelectedFile(filePath);
     setSelectedFileContent(content);
     setViewMode('code');
+    // Close sidebar on mobile after selection
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
   };
 
   // Handle AI processing events
@@ -123,41 +133,56 @@ export default function ProjectPage() {
   // Status badge
   const getStatusBadge = (status: Project['status']) => {
     const styles: Record<string, string> = {
-      pending: 'bg-yellow-500/10 text-yellow-500',
-      cloning: 'bg-purple-500/10 text-purple-500',
-      indexing: 'bg-blue-500/10 text-blue-500',
-      ready: 'bg-green-500/10 text-green-500',
-      error: 'bg-red-500/10 text-red-500',
+      pending: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
+      cloning: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
+      indexing: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+      ready: 'bg-green-500/20 text-green-400 border border-green-500/30',
+      error: 'bg-red-500/20 text-red-400 border border-red-500/30',
     };
     const isInProgress = status === 'cloning' || status === 'indexing';
     return (
-      <span className={`rounded-full px-2 py-1 text-xs font-medium ${styles[status]} flex items-center gap-1`}>
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles[status]}`}>
         {isInProgress && (
-          <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-current"></span>
+          </span>
         )}
-        {status}
+        {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     );
   };
 
+  if (!mounted) return null;
+
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-gray-900 to-gray-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-500/30 border-t-blue-500" />
+          <p className="text-sm text-gray-400">Loading project...</p>
+        </div>
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center bg-gray-950 text-white">
-        <h1 className="text-2xl font-bold">Project not found</h1>
-        <button
-          onClick={() => router.push('/dashboard')}
-          className="mt-4 text-blue-500 hover:underline"
-        >
-          Back to Dashboard
-        </button>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-gray-900 to-gray-950 px-4">
+        <div className="rounded-2xl bg-gray-800/50 p-8 text-center backdrop-blur-sm border border-gray-700/50">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10">
+            <Folder className="h-8 w-8 text-red-400" />
+          </div>
+          <h1 className="text-xl font-semibold text-white">Project not found</h1>
+          <p className="mt-2 text-gray-400">The project you're looking for doesn't exist.</p>
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
@@ -165,176 +190,215 @@ export default function ProjectPage() {
   const isReady = project.status === 'ready';
 
   return (
-    <div className="flex h-screen flex-col bg-gray-950 text-white">
+    <div className="flex h-screen flex-col bg-gray-950 text-white overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
-        <div className="flex items-center gap-4">
+      <header className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm px-4 py-3">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => router.push('/dashboard')}
-            className="text-gray-400 hover:text-white"
+            className="flex-shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+            title="Back to Dashboard"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <h1 className="text-lg font-semibold">{project.name}</h1>
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <GitBranch className="h-4 w-4" />
-              <span>{project.default_branch}</span>
-              <span>•</span>
-              <span>{project.indexed_files_count} files indexed</span>
+
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-lg font-semibold">{project.name}</h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-400">
+              <span className="inline-flex items-center gap-1">
+                <GitBranch className="h-3.5 w-3.5" />
+                {project.default_branch}
+              </span>
+              <span className="hidden sm:inline">•</span>
+              <span>{project.indexed_files_count} files</span>
               {project.laravel_version && (
                 <>
-                  <span>•</span>
-                  <span>Laravel {project.laravel_version}</span>
+                  <span className="hidden sm:inline">•</span>
+                  <span className="text-orange-400">Laravel {project.laravel_version}</span>
                 </>
               )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {getStatusBadge(project.status)}
           <button
             onClick={handleSync}
             disabled={syncing || !isReady}
-            className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm font-medium hover:bg-gray-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700"
           >
             <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-            Sync
+            <span className="hidden sm:inline">Sync</span>
           </button>
         </div>
       </header>
 
       {/* Main Content */}
       {isReady ? (
-        <PanelGroup orientation="horizontal" className="flex-1">
-          {/* File Tree Sidebar */}
-          <Panel defaultSize={20} minSize={15} maxSize={35}>
-            <div className="h-full border-r border-gray-800 bg-gray-900/50">
-              <FileTree
-                projectId={projectId}
-                onFileSelect={handleFileSelect}
-                selectedFile={selectedFile}
-              />
-            </div>
-          </Panel>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar Toggle for Mobile */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden fixed bottom-4 left-4 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-500/25 transition-transform hover:scale-105"
+          >
+            {sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeft className="h-5 w-5" />}
+          </button>
 
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-500 transition-colors" />
+          {/* File Tree Sidebar */}
+          <aside
+            className={`
+              ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+              fixed md:relative inset-y-0 left-0 z-40 w-72 md:w-64 lg:w-72
+              flex-shrink-0 border-r border-gray-800 bg-gray-900
+              transition-transform duration-300 ease-in-out
+              md:block
+            `}
+            style={{ top: 'auto', height: 'calc(100vh - 73px)' }}
+          >
+            <FileTree
+              projectId={projectId}
+              onFileSelect={handleFileSelect}
+              selectedFile={selectedFile}
+            />
+          </aside>
+
+          {/* Overlay for mobile */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-black/50 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
 
           {/* Main Area */}
-          <Panel defaultSize={80}>
-            <div className="flex h-full flex-col">
-              {/* View Mode Tabs */}
-              <div className="flex border-b border-gray-800 bg-gray-900/30">
+          <main className="flex flex-1 flex-col overflow-hidden">
+            {/* View Mode Tabs */}
+            <div className="flex-shrink-0 flex items-center gap-1 border-b border-gray-800 bg-gray-900/50 px-2 overflow-x-auto">
+              <button
+                onClick={() => setViewMode('chat')}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                  viewMode === 'chat'
+                    ? 'border-b-2 border-blue-500 text-blue-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Chat
+              </button>
+              <button
+                onClick={() => setViewMode('code')}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                  viewMode === 'code'
+                    ? 'border-b-2 border-blue-500 text-blue-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Code className="h-4 w-4" />
+                Code
+              </button>
+              {executionResults.length > 0 && (
                 <button
-                  onClick={() => setViewMode('chat')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
-                    viewMode === 'chat'
-                      ? 'border-b-2 border-blue-500 text-blue-500'
+                  onClick={() => setViewMode('changes')}
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                    viewMode === 'changes'
+                      ? 'border-b-2 border-blue-500 text-blue-400'
                       : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  <MessageSquare className="h-4 w-4" />
-                  Chat
+                  <FileText className="h-4 w-4" />
+                  Changes
+                  <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400">
+                    {executionResults.length}
+                  </span>
                 </button>
-                <button
-                  onClick={() => setViewMode('code')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
-                    viewMode === 'code'
-                      ? 'border-b-2 border-blue-500 text-blue-500'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Code className="h-4 w-4" />
-                  Code
-                </button>
-                {executionResults.length > 0 && (
-                  <button
-                    onClick={() => setViewMode('changes')}
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
-                      viewMode === 'changes'
-                        ? 'border-b-2 border-blue-500 text-blue-500'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <FileText className="h-4 w-4" />
-                    Changes
-                    <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400">
-                      {executionResults.length}
-                    </span>
-                  </button>
-                )}
-              </div>
-
-              {/* View Content */}
-              <div className="flex-1 overflow-hidden">
-                {viewMode === 'chat' && (
-                  <div className="flex h-full">
-                    {/* Chat Area */}
-                    <div className={`flex-1 ${isProcessing ? 'w-1/2' : 'w-full'}`}>
-                      <Chat
-                        projectId={projectId}
-                        onProcessingStart={handleProcessingStart}
-                        onProcessingEnd={handleProcessingEnd}
-                        onProcessingEvent={handleProcessingEvent}
-                      />
-                    </div>
-
-                    {/* Progress Tracker (when processing) */}
-                    {isProcessing && (
-                      <div className="w-1/2 border-l border-gray-800">
-                        <ProgressTracker events={processingEvents} />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {viewMode === 'code' && (
-                  <CodeViewer
-                    filePath={selectedFile}
-                    content={selectedFileContent}
-                  />
-                )}
-
-                {viewMode === 'changes' && (
-                  <ChangesReview
-                    results={executionResults}
-                    projectId={projectId}
-                    onDiscard={() => {
-                      setExecutionResults([]);
-                      setViewMode('chat');
-                    }}
-                  />
-                )}
-              </div>
+              )}
             </div>
-          </Panel>
-        </PanelGroup>
+
+            {/* View Content */}
+            <div className="flex-1 overflow-hidden">
+              {viewMode === 'chat' && (
+                <div className="flex h-full">
+                  {/* Chat Area */}
+                  <div className={`flex-1 min-w-0 ${isProcessing ? 'lg:w-1/2' : 'w-full'}`}>
+                    <Chat
+                      projectId={projectId}
+                      onProcessingStart={handleProcessingStart}
+                      onProcessingEnd={handleProcessingEnd}
+                      onProcessingEvent={handleProcessingEvent}
+                    />
+                  </div>
+
+                  {/* Progress Tracker (when processing) */}
+                  {isProcessing && (
+                    <div className="hidden lg:block w-96 border-l border-gray-800 overflow-hidden">
+                      <ProgressTracker events={processingEvents} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {viewMode === 'code' && (
+                <CodeViewer
+                  filePath={selectedFile}
+                  content={selectedFileContent}
+                />
+              )}
+
+              {viewMode === 'changes' && (
+                <ChangesReview
+                  results={executionResults}
+                  projectId={projectId}
+                  onDiscard={() => {
+                    setExecutionResults([]);
+                    setViewMode('chat');
+                  }}
+                />
+              )}
+            </div>
+          </main>
+        </div>
       ) : (
         /* Not Ready State */
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center">
+        <div className="flex flex-1 items-center justify-center p-4">
+          <div className="max-w-md w-full rounded-2xl bg-gray-800/50 p-8 text-center backdrop-blur-sm border border-gray-700/50">
             {project.status === 'error' ? (
               <>
-                <div className="text-6xl mb-4">⚠️</div>
-                <h2 className="text-xl font-semibold text-red-400">Error</h2>
-                <p className="mt-2 text-gray-400">{project.error_message}</p>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10">
+                  <span className="text-3xl">⚠️</span>
+                </div>
+                <h2 className="text-xl font-semibold text-red-400">Something went wrong</h2>
+                <p className="mt-3 text-gray-400">{project.error_message || 'An unexpected error occurred.'}</p>
                 <button
                   onClick={handleSync}
-                  className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500"
+                  className="mt-6 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
                 >
-                  Retry
+                  <RefreshCw className="h-4 w-4" />
+                  Try Again
                 </button>
               </>
             ) : (
               <>
-                <div className="h-12 w-12 mx-auto animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
-                <h2 className="mt-4 text-xl font-semibold">
-                  {project.status === 'cloning' ? 'Cloning Repository...' : 'Indexing Files...'}
+                <div className="relative mx-auto mb-6 h-16 w-16">
+                  <div className="absolute inset-0 animate-spin rounded-full border-4 border-blue-500/30 border-t-blue-500" />
+                  <div className="absolute inset-2 animate-pulse rounded-full bg-blue-500/10" />
+                </div>
+                <h2 className="text-xl font-semibold text-white">
+                  {project.status === 'cloning' ? 'Cloning Repository' :
+                   project.status === 'indexing' ? 'Indexing Files' : 'Preparing Project'}
                 </h2>
-                <p className="mt-2 text-gray-400">
-                  This may take a few minutes depending on the repository size.
+                <p className="mt-3 text-gray-400">
+                  {project.status === 'cloning'
+                    ? 'Downloading your repository from GitHub...'
+                    : 'Analyzing and indexing your Laravel codebase...'}
                 </p>
+                <div className="mt-6 flex items-center justify-center gap-2 text-sm text-gray-500">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
+                  </span>
+                  This may take a few minutes
+                </div>
               </>
             )}
           </div>
