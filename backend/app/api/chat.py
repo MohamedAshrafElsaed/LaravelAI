@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.prompts import CHAT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT_SIMPLE
 from app.models.models import Project, User, ProjectStatus, Conversation, Message
 from app.agents.orchestrator import Orchestrator, ProcessEvent, ProcessPhase
 from app.services.claude import get_claude_service, create_tracked_claude_service, ClaudeModel
@@ -451,30 +452,28 @@ async def stream_question_response(
         })
 
         # Build prompt for question answering with rich project context
-        system_prompt = """You are an expert developer assistant with deep knowledge of this specific codebase.
-Answer the user's question based on the provided project information and codebase context.
-Be specific, reference actual code when relevant, and provide examples.
-Follow the project's conventions and patterns when suggesting solutions.
-If you're not sure about something, say so."""
-
-        user_prompt = f"""## Question
+        user_prompt = f"""<question>
 {question}
+</question>
 
+<project_info>
 {project_context}
+</project_info>
 
-## Relevant Code Context
+<codebase_context>
 {context.to_prompt_string()}
+</codebase_context>
 
-Please answer the question based on this project and codebase context. Use the technology stack, conventions, and patterns specific to this project."""
+Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant."""
 
-        # Stream response from Claude using the tracked service
+        # Stream response from Claude using the tracked service with enhanced system prompt
         messages = [{"role": "user", "content": user_prompt}]
 
         full_response = ""
         async for chunk in claude_service.stream(
             model=ClaudeModel.SONNET,
             messages=messages,
-            system=system_prompt,
+            system=CHAT_SYSTEM_PROMPT,
             temperature=0.7,
             request_type="chat",
         ):
@@ -771,24 +770,24 @@ async def chat_sync(
             # Get context, project context and answer question
             intent, context, project_context = await orchestrator.process_question(project_id, request.message)
 
-            system_prompt = """You are an expert developer assistant with deep knowledge of this specific codebase.
-Answer the user's question based on the provided project information and codebase context.
-Follow the project's conventions and patterns when suggesting solutions."""
-
-            user_prompt = f"""## Question
+            user_prompt = f"""<question>
 {request.message}
+</question>
 
+<project_info>
 {project_context}
+</project_info>
 
-## Relevant Code Context
+<codebase_context>
 {context.to_prompt_string()}
+</codebase_context>
 
-Please answer based on this project's specific technology stack, conventions, and patterns."""
+Answer based on this project's specific technology stack, conventions, and patterns."""
 
             response_text = await claude_service.chat_async(
                 model=ClaudeModel.SONNET,
                 messages=[{"role": "user", "content": user_prompt}],
-                system=system_prompt,
+                system=CHAT_SYSTEM_PROMPT_SIMPLE,
                 request_type="chat",
             )
 

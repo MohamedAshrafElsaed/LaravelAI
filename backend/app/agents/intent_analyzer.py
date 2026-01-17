@@ -13,57 +13,115 @@ from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
 
-INTENT_ANALYSIS_PROMPT = """You are an expert Laravel developer assistant. Analyze the user's request and extract structured information about their intent.
+INTENT_ANALYSIS_PROMPT = """<role>
+You are an expert Laravel architect specializing in understanding developer requests and translating them into actionable technical specifications. Your analysis directly determines which code changes will be made, so accuracy is critical.
+</role>
 
-PROJECT CONTEXT:
+<context>
+Accurate intent analysis ensures the correct files are modified and the right approach is taken. Misclassifying a bugfix as a feature could lead to unnecessary new code. Missing an affected domain could leave changes incomplete. Poor search queries mean relevant existing code won't be found for context.
+</context>
+
+<project_info>
 {project_context}
+</project_info>
 
-USER REQUEST:
+<user_request>
 {user_input}
+</user_request>
 
-Analyze this request and respond with a JSON object containing:
+<instructions>
+Analyze the user's request and extract structured information. Think through:
+1. What is the user trying to accomplish? (task_type)
+2. Which parts of the Laravel application are involved? (domains_affected)
+3. How extensive are the changes? (scope)
+4. What file types will be modified? (languages)
+5. Does this require database schema changes? (requires_migration)
+6. What search terms would find relevant existing code? (search_queries)
 
-1. "task_type": One of:
-   - "feature" - Adding new functionality
-   - "bugfix" - Fixing a bug or error
-   - "refactor" - Improving code without changing behavior
-   - "question" - User is asking a question, not requesting changes
+Handle ambiguous requests by inferring the most likely intent based on context clues:
+- Mentions of "broken", "not working", "error", "fix" → likely bugfix
+- Mentions of "add", "create", "new", "implement" → likely feature
+- Mentions of "clean up", "improve", "refactor", "optimize" → likely refactor
+- Ends with "?" or asks "how", "why", "what" → likely question
+</instructions>
 
-2. "domains_affected": Array of Laravel domains that will be affected. Examples:
-   - "auth" - Authentication/authorization
-   - "payment" - Payment processing
-   - "api" - API endpoints
-   - "database" - Database/migrations
-   - "queue" - Jobs/queues
-   - "mail" - Email functionality
-   - "storage" - File storage
-   - "cache" - Caching
-   - "routing" - Routes
-   - "middleware" - Middleware
-   - "validation" - Form validation
-   - "events" - Events/listeners
+<output_format>
+Respond with a JSON object containing:
 
-3. "scope": One of:
-   - "single_file" - Changes to one file only
-   - "feature" - Multiple related files in one feature
-   - "cross_domain" - Changes spanning multiple domains
+- "task_type": "feature" | "bugfix" | "refactor" | "question"
+- "domains_affected": Array of affected domains from: auth, payment, api, database, queue, mail, storage, cache, routing, middleware, validation, events, models, controllers, services, views
+- "scope": "single_file" | "feature" | "cross_domain"
+- "languages": Array from: php, blade, vue, js, ts, css, json, yaml
+- "requires_migration": boolean
+- "search_queries": Array of 2-5 specific search terms (class names, method names, Laravel concepts)
+</output_format>
 
-4. "languages": Array of languages/file types involved. Examples:
-   - "php" - PHP code
-   - "blade" - Blade templates
-   - "vue" - Vue.js components
-   - "js" - JavaScript
-   - "css" - Stylesheets
-   - "json" - JSON config files
+<examples>
+<example>
+<input>The login form shows "invalid credentials" even when I enter the correct password</input>
+<output>
+{{
+  "task_type": "bugfix",
+  "domains_affected": ["auth", "validation"],
+  "scope": "single_file",
+  "languages": ["php"],
+  "requires_migration": false,
+  "search_queries": ["LoginController", "AuthenticatesUsers", "attempt", "credentials", "validateLogin"]
+}}
+</output>
+</example>
 
-5. "requires_migration": Boolean - Does this need a database migration?
+<example>
+<input>Add a feature to export user orders as PDF with filtering by date range</input>
+<output>
+{{
+  "task_type": "feature",
+  "domains_affected": ["controllers", "services", "views", "routing"],
+  "scope": "feature",
+  "languages": ["php", "blade"],
+  "requires_migration": false,
+  "search_queries": ["OrderController", "Order", "export", "PDF", "dompdf", "OrderService"]
+}}
+</output>
+</example>
 
-6. "search_queries": Array of 2-5 search terms to find relevant code in the codebase.
-   Be specific and include:
-   - Class names that might exist
-   - Method names
-   - Key terms from the request
-   - Related Laravel concepts
+<example>
+<input>Create a notifications system where users get emails when their order ships, with a database to track notification history</input>
+<output>
+{{
+  "task_type": "feature",
+  "domains_affected": ["database", "mail", "events", "queue", "models", "controllers"],
+  "scope": "cross_domain",
+  "languages": ["php", "blade"],
+  "requires_migration": true,
+  "search_queries": ["Notification", "OrderShipped", "Mailable", "notifications table", "NotificationController", "event listener"]
+}}
+</output>
+</example>
+
+<example>
+<input>How does the payment processing work in this app?</input>
+<output>
+{{
+  "task_type": "question",
+  "domains_affected": ["payment", "services"],
+  "scope": "single_file",
+  "languages": ["php"],
+  "requires_migration": false,
+  "search_queries": ["PaymentService", "PaymentController", "stripe", "charge", "processPayment"]
+}}
+</output>
+</example>
+</examples>
+
+<verification>
+Before responding, verify:
+1. task_type matches the user's actual intent (action vs question)
+2. All potentially affected domains are listed
+3. scope accurately reflects the extent of changes
+4. search_queries are specific enough to find relevant code
+5. Your JSON is valid and all fields are populated
+</verification>
 
 Respond ONLY with the JSON object, no additional text."""
 

@@ -88,16 +88,36 @@ class AIContextGenerator:
 {self._format_key_files()}
 
 ## Important Rules for AI
-1. NEVER rewrite entire files - show ONLY the changes needed
-2. Follow existing patterns in the codebase
-3. Use the same coding style (PSR-12 for PHP, existing Vue patterns)
-4. {'Use TypeScript for all frontend code' if frontend.get('typescript') else 'Use JavaScript for frontend code'}
-5. {'Use Composition API with <script setup>' if frontend.get('composition_api') else 'Use Options API for Vue components'}
-6. {'Place business logic in Services' if by_category.get('services', 0) > 0 else 'Keep business logic organized'}
-7. {'Use Form Requests for validation' if by_category.get('requests', 0) > 0 else 'Validate input appropriately'}
-8. {'Use API Resources for responses' if by_category.get('resources', 0) > 0 else 'Format API responses consistently'}
-9. Always handle errors gracefully
-10. Write code that matches the project's existing quality standards
+
+### Code Generation Principles
+1. **Minimal changes**: Only modify what's necessary - never rewrite entire files
+2. **Follow existing patterns**: Match the architecture, naming, and structure already in the codebase
+3. **No placeholders**: Generate complete, working code - never leave TODOs or "implement later" comments
+
+### PHP/Laravel Guidelines
+4. **PSR-12**: Follow PSR-12 coding standard (4-space indentation, proper bracing)
+5. **Type declarations**: Always use type hints for parameters and return types
+6. {'**Strict types**: Add declare(strict_types=1) to new PHP files' if self._check_strict_types() else '**Type hints**: Use type hints where possible'}
+7. **Namespaces**: Ensure namespace matches file path exactly (app/Services/PaymentService.php → App\\Services)
+8. **Dependency injection**: Prefer constructor injection over facades in services
+
+### Architecture Patterns
+9. {'**Services**: Place business logic in Service classes, not Controllers' if by_category.get('services', 0) > 0 else '**Organization**: Keep business logic organized and separate from controllers'}
+10. {'**Form Requests**: Use Form Request classes for all validation' if by_category.get('requests', 0) > 0 else '**Validation**: Validate all user input appropriately'}
+11. {'**API Resources**: Use Resource classes for API response formatting' if by_category.get('resources', 0) > 0 else '**Responses**: Format API responses consistently'}
+12. {'**Events**: Use Events/Listeners for cross-cutting concerns' if by_category.get('events', 0) > 0 else '**Decoupling**: Keep components loosely coupled'}
+
+### Frontend Guidelines
+13. {'**TypeScript**: Use TypeScript with proper types for all frontend code' if frontend.get('typescript') else '**JavaScript**: Use modern JavaScript (ES6+) for frontend code'}
+14. {'**Composition API**: Use Composition API with <script setup> for Vue components' if frontend.get('composition_api') else '**Options API**: Use Options API for Vue components'}
+15. {'**Inertia.js**: Use Inertia for page navigation and data passing' if frontend.get('inertia') else '**API calls**: Handle frontend-backend communication appropriately'}
+
+### Quality Standards
+16. **Error handling**: Always handle errors gracefully with proper try/catch blocks
+17. **Docblocks**: Include docblocks with @param, @return, @throws on public methods
+18. **Security**: Never trust user input - validate at boundaries, use prepared statements
+19. **Testing**: Write code that is testable (injectable dependencies, single responsibility)
+20. **Consistency**: Match the quality and style of existing code in this project
 """
         return content
 
