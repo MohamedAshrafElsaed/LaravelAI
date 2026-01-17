@@ -4,8 +4,11 @@ Git service for cloning and managing repositories.
 import os
 import shutil
 import logging
+import httpx
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+from datetime import datetime
 
 from git import Repo, GitCommandError
 from git.exc import InvalidGitRepositoryError
@@ -380,3 +383,436 @@ class GitService:
 
         logger.info(f"[GIT] Found {len(php_files)} PHP files")
         return php_files
+
+    def list_branches(self, clone_path: str) -> List[Dict[str, Any]]:
+        """
+        List all branches in the repository.
+
+        Args:
+            clone_path: Path to the cloned repository
+
+        Returns:
+            List of branch info dictionaries
+        """
+        logger.info(f"[GIT] Listing branches for {clone_path}")
+        try:
+            repo = Repo(clone_path)
+            branches = []
+
+            # Local branches
+            for branch in repo.branches:
+                branches.append({
+                    "name": branch.name,
+                    "is_current": branch == repo.active_branch,
+                    "commit": branch.commit.hexsha[:8],
+                    "message": branch.commit.message.split("\n")[0][:80],
+                    "author": branch.commit.author.name,
+                    "date": branch.commit.committed_datetime.isoformat(),
+                })
+
+            # Remote branches (if fetched)
+            for ref in repo.remotes.origin.refs:
+                name = ref.remote_head
+                if name != "HEAD" and not any(b["name"] == name for b in branches):
+                    branches.append({
+                        "name": name,
+                        "is_current": False,
+                        "is_remote": True,
+                        "commit": ref.commit.hexsha[:8],
+                        "message": ref.commit.message.split("\n")[0][:80],
+                        "author": ref.commit.author.name,
+                        "date": ref.commit.committed_datetime.isoformat(),
+                    })
+
+            logger.info(f"[GIT] Found {len(branches)} branches")
+            return branches
+
+        except Exception as e:
+            logger.error(f"[GIT] Failed to list branches: {str(e)}")
+            raise GitServiceError(f"Failed to list branches: {str(e)}")
+
+    def get_current_branch(self, clone_path: str) -> str:
+        """
+        Get the current branch name.
+
+        Args:
+            clone_path: Path to the cloned repository
+
+        Returns:
+            Current branch name
+        """
+        try:
+            repo = Repo(clone_path)
+            return repo.active_branch.name
+        except Exception as e:
+            logger.error(f"[GIT] Failed to get current branch: {str(e)}")
+            raise GitServiceError(f"Failed to get current branch: {str(e)}")
+
+    def create_branch(
+        self,
+        clone_path: str,
+        branch_name: str,
+        from_branch: Optional[str] = None,
+    ) -> str:
+        """
+        Create a new branch.
+
+        Args:
+            clone_path: Path to the cloned repository
+            branch_name: Name for the new branch
+            from_branch: Branch to create from (defaults to current branch)
+
+        Returns:
+            Name of the created branch
+
+        Raises:
+            GitServiceError: If branch creation fails
+        """
+        logger.info(f"[GIT] Creating branch '{branch_name}' in {clone_path}")
+        try:
+            repo = Repo(clone_path)
+
+            # If from_branch specified, checkout to it first
+            if from_branch:
+                logger.debug(f"[GIT] Checking out to base branch: {from_branch}")
+                repo.git.checkout(from_branch)
+
+            # Create and checkout new branch
+            logger.debug(f"[GIT] Creating new branch: {branch_name}")
+            new_branch = repo.create_head(branch_name)
+            new_branch.checkout()
+
+            logger.info(f"[GIT] Branch '{branch_name}' created and checked out")
+            return branch_name
+
+        except GitCommandError as e:
+            logger.error(f"[GIT] GitCommandError creating branch: {str(e)}")
+            if "already exists" in str(e):
+                raise GitServiceError(f"Branch '{branch_name}' already exists.")
+            raise GitServiceError(f"Failed to create branch: {str(e)}")
+
+        except Exception as e:
+            logger.exception(f"[GIT] Unexpected error creating branch: {str(e)}")
+            raise GitServiceError(f"Failed to create branch: {str(e)}")
+
+    def checkout_branch(self, clone_path: str, branch_name: str) -> None:
+        """
+        Checkout an existing branch.
+
+        Args:
+            clone_path: Path to the cloned repository
+            branch_name: Name of the branch to checkout
+        """
+        logger.info(f"[GIT] Checking out branch '{branch_name}' in {clone_path}")
+        try:
+            repo = Repo(clone_path)
+
+            # Check if branch exists locally
+            if branch_name in [b.name for b in repo.branches]:
+                repo.git.checkout(branch_name)
+            else:
+                # Try to checkout from remote
+                repo.git.checkout("-b", branch_name, f"origin/{branch_name}")
+
+            logger.info(f"[GIT] Checked out branch '{branch_name}'")
+
+        except GitCommandError as e:
+            logger.error(f"[GIT] Failed to checkout branch: {str(e)}")
+            raise GitServiceError(f"Failed to checkout branch '{branch_name}': {str(e)}")
+
+    def apply_changes(
+        self,
+        clone_path: str,
+        changes: List[Dict[str, Any]],
+        commit_message: str,
+        author_name: str = "Laravel AI",
+        author_email: str = "ai@laravelai.dev",
+    ) -> str:
+        """
+        Apply file changes and create a commit.
+
+        Args:
+            clone_path: Path to the cloned repository
+            changes: List of changes to apply, each with:
+                - file: file path relative to repo root
+                - action: 'create', 'modify', or 'delete'
+                - content: new file content (for create/modify)
+            commit_message: Message for the commit
+            author_name: Name for commit author
+            author_email: Email for commit author
+
+        Returns:
+            The commit hash
+
+        Raises:
+            GitServiceError: If applying changes fails
+        """
+        logger.info(f"[GIT] Applying {len(changes)} changes to {clone_path}")
+        try:
+            repo = Repo(clone_path)
+
+            # Configure git user
+            with repo.config_writer() as config:
+                config.set_value("user", "name", author_name)
+                config.set_value("user", "email", author_email)
+
+            # Apply each change
+            files_to_add = []
+            files_to_remove = []
+
+            for change in changes:
+                file_path = change.get("file")
+                action = change.get("action", "modify")
+                content = change.get("content", "")
+                full_path = os.path.join(clone_path, file_path)
+
+                logger.debug(f"[GIT] Applying {action} to {file_path}")
+
+                if action in ["create", "modify"]:
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                    # Write file content
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+
+                    files_to_add.append(file_path)
+                    logger.debug(f"[GIT] Wrote {len(content)} bytes to {file_path}")
+
+                elif action == "delete":
+                    if os.path.exists(full_path):
+                        os.remove(full_path)
+                        files_to_remove.append(file_path)
+                        logger.debug(f"[GIT] Deleted {file_path}")
+
+            # Stage changes
+            if files_to_add:
+                repo.index.add(files_to_add)
+            if files_to_remove:
+                repo.index.remove(files_to_remove)
+
+            # Create commit
+            commit = repo.index.commit(commit_message)
+            logger.info(f"[GIT] Created commit {commit.hexsha[:8]}: {commit_message[:50]}")
+
+            return commit.hexsha
+
+        except Exception as e:
+            logger.exception(f"[GIT] Failed to apply changes: {str(e)}")
+            raise GitServiceError(f"Failed to apply changes: {str(e)}")
+
+    def push_branch(
+        self,
+        clone_path: str,
+        branch_name: Optional[str] = None,
+        force: bool = False,
+    ) -> bool:
+        """
+        Push a branch to the remote repository.
+
+        Args:
+            clone_path: Path to the cloned repository
+            branch_name: Branch to push (defaults to current branch)
+            force: Force push if needed
+
+        Returns:
+            True if push succeeded
+
+        Raises:
+            GitServiceError: If push fails
+        """
+        logger.info(f"[GIT] Pushing branch to remote from {clone_path}")
+        try:
+            repo = Repo(clone_path)
+            origin = repo.remotes.origin
+
+            if branch_name is None:
+                branch_name = repo.active_branch.name
+
+            # Push the branch
+            push_args = ["-u", "origin", branch_name]
+            if force:
+                push_args.insert(0, "--force")
+
+            logger.debug(f"[GIT] Executing push: {' '.join(push_args)}")
+            result = repo.git.push(*push_args)
+
+            logger.info(f"[GIT] Push completed successfully")
+            return True
+
+        except GitCommandError as e:
+            logger.error(f"[GIT] Push failed: {str(e)}")
+            if "Authentication failed" in str(e):
+                raise GitServiceError("GitHub authentication failed. Token may be invalid.")
+            if "rejected" in str(e) and not force:
+                raise GitServiceError("Push rejected. Remote has newer changes. Consider force push.")
+            raise GitServiceError(f"Failed to push branch: {str(e)}")
+
+        except Exception as e:
+            logger.exception(f"[GIT] Unexpected error during push: {str(e)}")
+            raise GitServiceError(f"Failed to push branch: {str(e)}")
+
+    def get_diff(
+        self,
+        clone_path: str,
+        base_branch: Optional[str] = None,
+    ) -> str:
+        """
+        Get the diff between current branch and base branch.
+
+        Args:
+            clone_path: Path to the cloned repository
+            base_branch: Branch to compare against (defaults to main/master)
+
+        Returns:
+            Unified diff string
+        """
+        logger.info(f"[GIT] Getting diff for {clone_path}")
+        try:
+            repo = Repo(clone_path)
+
+            if base_branch is None:
+                # Try main, then master
+                base_branch = "main"
+                if "master" in [b.name for b in repo.branches]:
+                    base_branch = "master"
+
+            diff = repo.git.diff(f"{base_branch}...HEAD")
+            return diff
+
+        except Exception as e:
+            logger.error(f"[GIT] Failed to get diff: {str(e)}")
+            return ""
+
+    async def create_pull_request(
+        self,
+        repo_full_name: str,
+        branch_name: str,
+        base_branch: str,
+        title: str,
+        description: str,
+        files_changed: List[str],
+        ai_summary: str,
+    ) -> Dict[str, Any]:
+        """
+        Create a pull request via GitHub API.
+
+        Args:
+            repo_full_name: Repository in owner/repo format
+            branch_name: Source branch for the PR
+            base_branch: Target branch (usually main/master)
+            title: PR title
+            description: PR description
+            files_changed: List of files modified
+            ai_summary: AI-generated summary of changes
+
+        Returns:
+            PR data including URL, number, etc.
+
+        Raises:
+            GitServiceError: If PR creation fails
+        """
+        logger.info(f"[GIT] Creating PR for {repo_full_name}: {branch_name} -> {base_branch}")
+
+        # Build PR body
+        body = f"""{description}
+
+---
+
+## AI-Generated Summary
+
+{ai_summary}
+
+## Files Changed
+
+{chr(10).join(f'- `{f}`' for f in files_changed)}
+
+---
+*This PR was created by Laravel AI*
+"""
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"https://api.github.com/repos/{repo_full_name}/pulls",
+                    headers={
+                        "Authorization": f"token {self.github_token}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                    json={
+                        "title": title,
+                        "body": body,
+                        "head": branch_name,
+                        "base": base_branch,
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code == 201:
+                    pr_data = response.json()
+                    logger.info(f"[GIT] PR created successfully: #{pr_data['number']}")
+                    return {
+                        "number": pr_data["number"],
+                        "url": pr_data["html_url"],
+                        "api_url": pr_data["url"],
+                        "state": pr_data["state"],
+                        "title": pr_data["title"],
+                        "created_at": pr_data["created_at"],
+                    }
+
+                elif response.status_code == 422:
+                    # Validation error - might be PR already exists
+                    error_data = response.json()
+                    errors = error_data.get("errors", [])
+                    for error in errors:
+                        if "pull request already exists" in error.get("message", "").lower():
+                            raise GitServiceError("A pull request for this branch already exists.")
+                    raise GitServiceError(f"GitHub validation error: {error_data}")
+
+                elif response.status_code == 401:
+                    raise GitServiceError("GitHub authentication failed. Token may be invalid.")
+
+                elif response.status_code == 404:
+                    raise GitServiceError("Repository not found or no access.")
+
+                else:
+                    error_text = response.text
+                    logger.error(f"[GIT] GitHub API error {response.status_code}: {error_text}")
+                    raise GitServiceError(f"GitHub API error: {error_text}")
+
+        except httpx.RequestError as e:
+            logger.error(f"[GIT] HTTP error creating PR: {str(e)}")
+            raise GitServiceError(f"Failed to connect to GitHub: {str(e)}")
+
+        except GitServiceError:
+            raise
+
+        except Exception as e:
+            logger.exception(f"[GIT] Unexpected error creating PR: {str(e)}")
+            raise GitServiceError(f"Failed to create pull request: {str(e)}")
+
+    def reset_to_remote(self, clone_path: str, branch_name: Optional[str] = None) -> None:
+        """
+        Reset local branch to match remote.
+
+        Args:
+            clone_path: Path to the cloned repository
+            branch_name: Branch to reset (defaults to current)
+        """
+        logger.info(f"[GIT] Resetting to remote for {clone_path}")
+        try:
+            repo = Repo(clone_path)
+
+            if branch_name is None:
+                branch_name = repo.active_branch.name
+
+            # Fetch latest
+            repo.remotes.origin.fetch()
+
+            # Hard reset to remote
+            repo.git.reset("--hard", f"origin/{branch_name}")
+            logger.info(f"[GIT] Reset to origin/{branch_name} successful")
+
+        except Exception as e:
+            logger.error(f"[GIT] Failed to reset: {str(e)}")
+            raise GitServiceError(f"Failed to reset to remote: {str(e)}")
