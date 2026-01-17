@@ -437,11 +437,11 @@ IMPORTANT: Consider the conversation history above when processing this request.
 
 Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant."""
 
-                # Stream response from Claude
+                # Stream response from Claude with caching
                 messages_for_claude = [{"role": "user", "content": user_prompt}]
                 full_response = ""
 
-                async for chunk in claude_service.stream(
+                async for chunk in claude_service.stream_cached(
                     model=ClaudeModel.SONNET,
                     messages=messages_for_claude,
                     system=CHAT_SYSTEM_PROMPT,
@@ -711,11 +711,11 @@ async def stream_question_response(
 
 Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant. If the user is referring to previous conversation context, use that information to provide a relevant answer."""
 
-        # Stream response from Claude using the tracked service with enhanced system prompt
+        # Stream response from Claude using cached streaming for prompt caching
         messages = [{"role": "user", "content": user_prompt}]
 
         full_response = ""
-        async for chunk in claude_service.stream(
+        async for chunk in claude_service.stream_cached(
             model=ClaudeModel.SONNET,
             messages=messages,
             system=CHAT_SYSTEM_PROMPT,
@@ -1559,3 +1559,268 @@ async def get_operations_log_detail(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error reading log file: {str(e)}",
         )
+
+
+# ============== Batch Processing Endpoints ==============
+
+class BatchAnalysisRequest(BaseModel):
+    """Request body for batch file analysis."""
+    files: list[dict]  # List of {"path": str, "content": str}
+    analysis_type: str = "file_analysis"  # file_analysis, code_review, security_scan
+    wait_for_completion: bool = False
+
+
+class BatchStatusResponse(BaseModel):
+    """Response for batch status check."""
+    id: str
+    status: str
+    total_requests: int
+    completed_requests: int
+    failed_requests: int
+    total_tokens: int
+    total_cost: float
+    error: Optional[str] = None
+
+
+# Store batch processor and jobs
+_batch_processor = None
+_batch_jobs: dict = {}
+
+
+def _get_batch_processor():
+    """Get or create batch processor."""
+    global _batch_processor
+    if _batch_processor is None:
+        from app.services.batch_processor import BatchProcessor
+        _batch_processor = BatchProcessor()
+    return _batch_processor
+
+
+@router.post("/{project_id}/batch/analyze")
+async def create_batch_analysis(
+    project_id: str,
+    request: BatchAnalysisRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a batch analysis job for multiple files.
+
+    Provides 50% cost savings compared to individual API calls.
+    Use for bulk file analysis, code review, or security scanning.
+
+    Analysis types:
+    - file_analysis: General file analysis (summary, complexity, issues)
+    - code_review: Detailed code review with quality score
+    - security_scan: Security vulnerability scanning
+
+    Args:
+        files: List of {"path": str, "content": str}
+        analysis_type: Type of analysis to perform
+        wait_for_completion: If true, waits for results (may timeout for large batches)
+
+    Returns:
+        Batch job ID and initial status
+    """
+    from app.services.batch_processor import BatchRequestType
+
+    logger.info(f"[CHAT] POST /{project_id}/batch/analyze - user_id={current_user.id}, files={len(request.files)}")
+
+    # Verify project access
+    await verify_project_access(project_id, current_user, db)
+
+    # Map analysis type to BatchRequestType
+    type_map = {
+        "file_analysis": BatchRequestType.FILE_ANALYSIS,
+        "code_review": BatchRequestType.CODE_REVIEW,
+        "security_scan": BatchRequestType.SECURITY_SCAN,
+        "architecture_review": BatchRequestType.ARCHITECTURE_REVIEW,
+        "performance_analysis": BatchRequestType.PERFORMANCE_ANALYSIS,
+        "documentation_generation": BatchRequestType.DOCUMENTATION_GENERATION,
+    }
+
+    request_type = type_map.get(request.analysis_type, BatchRequestType.FILE_ANALYSIS)
+
+    # Start operations logging
+    ops_session_id = _ops_logger.start_chat_session(
+        user_id=str(current_user.id),
+        project_id=project_id,
+        conversation_id=f"batch_{uuid4()}",
+    )
+
+    try:
+        processor = _get_batch_processor()
+
+        # Create batch job
+        job = await processor.analyze_files(
+            files=request.files,
+            request_type=request_type,
+            wait_for_completion=request.wait_for_completion,
+        )
+
+        # Store job for later retrieval
+        _batch_jobs[job.id] = {
+            "job": job,
+            "user_id": str(current_user.id),
+            "project_id": project_id,
+            "ops_session_id": ops_session_id,
+        }
+
+        # If completed, end session
+        if job.status.value in ["completed", "failed", "cancelled"]:
+            _ops_logger.end_chat_session(ops_session_id)
+
+        return {
+            "success": True,
+            "batch_id": job.id,
+            "status": job.status.value,
+            "total_requests": job.total_requests,
+            "completed_requests": job.completed_requests,
+            "failed_requests": job.failed_requests,
+            "message": f"Batch job created with {len(request.files)} files. "
+                      f"Use GET /batch/{job.id} to check status.",
+        }
+
+    except Exception as e:
+        logger.exception(f"[CHAT] Batch creation error: {e}")
+        _ops_logger.end_chat_session(ops_session_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.get("/{project_id}/batch/{batch_id}")
+async def get_batch_status(
+    project_id: str,
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the status of a batch processing job.
+
+    Returns current status, progress, and results if completed.
+    """
+    logger.info(f"[CHAT] GET /{project_id}/batch/{batch_id} - user_id={current_user.id}")
+
+    # Check if job exists
+    job_data = _batch_jobs.get(batch_id)
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch job not found",
+        )
+
+    # Verify ownership
+    if job_data["user_id"] != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    job = job_data["job"]
+
+    # If still processing, poll for updates
+    if job.status.value == "processing":
+        processor = _get_batch_processor()
+        job = await processor.poll_batch(job, wait_for_completion=False)
+        job_data["job"] = job
+
+        # If now completed, end session
+        if job.status.value in ["completed", "failed", "cancelled"]:
+            ops_session_id = job_data.get("ops_session_id")
+            if ops_session_id:
+                _ops_logger.end_chat_session(ops_session_id)
+
+    return {
+        "success": True,
+        "batch_id": job.id,
+        "status": job.status.value,
+        "total_requests": job.total_requests,
+        "completed_requests": job.completed_requests,
+        "failed_requests": job.failed_requests,
+        "total_tokens": job.total_tokens,
+        "total_cost": job.total_cost,
+        "cost_savings": job.total_cost,  # Same as cost since batch is 50% off
+        "error": job.error,
+        "results": [r.to_dict() for r in job.results] if job.results else [],
+    }
+
+
+@router.delete("/{project_id}/batch/{batch_id}")
+async def cancel_batch_job(
+    project_id: str,
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Cancel a running batch job.
+    """
+    logger.info(f"[CHAT] DELETE /{project_id}/batch/{batch_id} - user_id={current_user.id}")
+
+    # Check if job exists
+    job_data = _batch_jobs.get(batch_id)
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch job not found",
+        )
+
+    # Verify ownership
+    if job_data["user_id"] != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    job = job_data["job"]
+
+    processor = _get_batch_processor()
+    job = await processor.cancel_batch(job)
+    job_data["job"] = job
+
+    # End session
+    ops_session_id = job_data.get("ops_session_id")
+    if ops_session_id:
+        _ops_logger.end_chat_session(ops_session_id)
+
+    return {
+        "success": True,
+        "batch_id": job.id,
+        "status": job.status.value,
+        "message": "Batch job cancelled",
+    }
+
+
+@router.get("/{project_id}/batch")
+async def list_batch_jobs(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List all batch jobs for the current user.
+    """
+    logger.info(f"[CHAT] GET /{project_id}/batch - user_id={current_user.id}")
+
+    user_jobs = [
+        {
+            "batch_id": batch_id,
+            "status": data["job"].status.value,
+            "total_requests": data["job"].total_requests,
+            "completed_requests": data["job"].completed_requests,
+            "failed_requests": data["job"].failed_requests,
+            "total_cost": data["job"].total_cost,
+            "created_at": data["job"].created_at.isoformat(),
+        }
+        for batch_id, data in _batch_jobs.items()
+        if data["user_id"] == str(current_user.id) and data["project_id"] == project_id
+    ]
+
+    return {
+        "success": True,
+        "jobs": user_jobs,
+        "count": len(user_jobs),
+    }
