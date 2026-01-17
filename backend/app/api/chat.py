@@ -280,16 +280,60 @@ async def stream_chat_response(
 
         # Build assistant response content
         if result.success:
-            summary_parts = []
-            if result.plan:
-                summary_parts.append(f"**Plan:** {result.plan.summary}")
-            if result.execution_results:
-                summary_parts.append(f"\n**Files changed:** {len(result.execution_results)}")
-                for r in result.execution_results:
-                    summary_parts.append(f"- [{r.action}] {r.file}")
-            if result.validation:
-                summary_parts.append(f"\n**Validation score:** {result.validation.score}/100")
-            response_content = "\n".join(summary_parts) if summary_parts else "Task completed successfully."
+            # Check if this was classified as a question (no plan/execution)
+            if not result.plan and not result.execution_results:
+                # This was classified as a question - generate an answer
+                logger.info("[CHAT] Intent classified as question, generating answer...")
+
+                # Get intent and context from orchestrator result
+                intent = result.intent
+                context = await orchestrator.context_retriever.retrieve(project_id, intent) if intent else None
+                project_context = orchestrator.build_project_context(await orchestrator._get_project(project_id))
+
+                # Build prompt for question answering
+                user_prompt = f"""<question>
+{message}
+</question>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context.to_prompt_string() if context else "No context available"}
+</codebase_context>
+
+Answer the question based on this project's specific technology stack, conventions, and patterns. Reference actual code and files when relevant."""
+
+                # Stream response from Claude
+                messages_for_claude = [{"role": "user", "content": user_prompt}]
+                full_response = ""
+
+                async for chunk in claude_service.stream(
+                    model=ClaudeModel.SONNET,
+                    messages=messages_for_claude,
+                    system=CHAT_SYSTEM_PROMPT,
+                    temperature=0.7,
+                    request_type="chat",
+                ):
+                    full_response += chunk
+                    yield create_sse_event(EventType.ANSWER_CHUNK, {
+                        "chunk": chunk,
+                    })
+
+                response_content = full_response
+            else:
+                # Normal task completion with plan and execution
+                summary_parts = []
+                if result.plan:
+                    summary_parts.append(f"**Plan:** {result.plan.summary}")
+                if result.execution_results:
+                    summary_parts.append(f"\n**Files changed:** {len(result.execution_results)}")
+                    for r in result.execution_results:
+                        summary_parts.append(f"- [{r.action}] {r.file}")
+                if result.validation:
+                    summary_parts.append(f"\n**Validation score:** {result.validation.score}/100")
+                response_content = "\n".join(summary_parts) if summary_parts else "Task completed successfully."
         else:
             # Build meaningful error message
             error_msg = result.error
@@ -810,24 +854,57 @@ Answer based on this project's specific technology stack, conventions, and patte
 
             # Format response
             if result.success:
-                summary_parts = []
-                if result.plan:
-                    summary_parts.append(f"**Plan:** {result.plan.summary}")
-                if result.execution_results:
-                    summary_parts.append(f"**Files changed:** {len(result.execution_results)}")
-                    for r in result.execution_results:
-                        summary_parts.append(f"- [{r.action}] {r.file}")
-                if result.validation:
-                    summary_parts.append(f"**Validation score:** {result.validation.score}/100")
+                # Check if this was classified as a question (no plan/execution)
+                if not result.plan and not result.execution_results:
+                    # This was classified as a question - generate an answer
+                    logger.info("[CHAT] Intent classified as question, generating answer...")
 
-                response_content = "\n".join(summary_parts)
+                    intent = result.intent
+                    context = await orchestrator.context_retriever.retrieve(project_id, intent) if intent else None
+                    project_context = orchestrator.build_project_context(await orchestrator._get_project(project_id))
+
+                    user_prompt = f"""<question>
+{request.message}
+</question>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context.to_prompt_string() if context else "No context available"}
+</codebase_context>
+
+Answer based on this project's specific technology stack, conventions, and patterns."""
+
+                    response_content = await claude_service.chat_async(
+                        model=ClaudeModel.SONNET,
+                        messages=[{"role": "user", "content": user_prompt}],
+                        system=CHAT_SYSTEM_PROMPT_SIMPLE,
+                        request_type="chat",
+                    )
+                    code_changes = None
+                else:
+                    # Normal task completion with plan and execution
+                    summary_parts = []
+                    if result.plan:
+                        summary_parts.append(f"**Plan:** {result.plan.summary}")
+                    if result.execution_results:
+                        summary_parts.append(f"**Files changed:** {len(result.execution_results)}")
+                        for r in result.execution_results:
+                            summary_parts.append(f"- [{r.action}] {r.file}")
+                    if result.validation:
+                        summary_parts.append(f"**Validation score:** {result.validation.score}/100")
+
+                    response_content = "\n".join(summary_parts) if summary_parts else "Task completed."
+
+                    code_changes = {
+                        "results": [r.to_dict() for r in result.execution_results],
+                        "validation": result.validation.to_dict() if result.validation else None,
+                    } if result.execution_results else None
             else:
                 response_content = f"Failed to process request: {result.error}"
-
-            code_changes = {
-                "results": [r.to_dict() for r in result.execution_results],
-                "validation": result.validation.to_dict() if result.validation else None,
-            } if result.execution_results else None
+                code_changes = None
 
             # Save assistant message
             saved_message = await save_message(
