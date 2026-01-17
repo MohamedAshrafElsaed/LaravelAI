@@ -118,6 +118,9 @@ class Project(Base):
     conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", back_populates="project", cascade="all, delete-orphan"
     )
+    git_changes: Mapped[list["GitChange"]] = relationship(
+        "GitChange", back_populates="project", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_projects_user_repo", "user_id", "github_repo_id", unique=True),
@@ -204,6 +207,9 @@ class Conversation(Base):
     messages: Mapped[list["Message"]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
     )
+    git_changes: Mapped[list["GitChange"]] = relationship(
+        "GitChange", back_populates="conversation", cascade="all, delete-orphan"
+    )
 
 
 class Message(Base):
@@ -235,4 +241,91 @@ class Message(Base):
     # Relationships
     conversation: Mapped["Conversation"] = relationship(
         "Conversation", back_populates="messages"
+    )
+    git_changes: Mapped[list["GitChange"]] = relationship(
+        "GitChange", back_populates="message"
+    )
+
+
+class GitChangeStatus(str, Enum):
+    """Status of a git change through the git flow."""
+
+    PENDING = "pending"          # Changes generated but not applied
+    APPLIED = "applied"          # Changes applied to local branch
+    PUSHED = "pushed"            # Branch pushed to remote
+    PR_CREATED = "pr_created"    # Pull request created
+    PR_MERGED = "pr_merged"      # Pull request merged
+    MERGED = "merged"            # Branch merged to default branch
+    ROLLED_BACK = "rolled_back"  # Changes rolled back
+    DISCARDED = "discarded"      # Changes discarded without applying
+
+
+class GitChange(Base):
+    """
+    Track git changes for each conversation.
+
+    Records the lifecycle of code changes from generation through PR creation/merge.
+    Supports rollback functionality to revert changes.
+    """
+
+    __tablename__ = "git_changes"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=generate_uuid
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("conversations.id", ondelete="CASCADE")
+    )
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE")
+    )
+    message_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Branch info
+    branch_name: Mapped[str] = mapped_column(String(255))
+    base_branch: Mapped[str] = mapped_column(String(100), default="main")
+    commit_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # Change status
+    status: Mapped[str] = mapped_column(
+        String(20), default=GitChangeStatus.PENDING.value
+    )
+
+    # PR info
+    pr_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pr_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    pr_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # Change details
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    files_changed: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Rollback info
+    rollback_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    rolled_back_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rolled_back_from_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    pr_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    merged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    conversation: Mapped["Conversation"] = relationship(
+        "Conversation", back_populates="git_changes"
+    )
+    project: Mapped["Project"] = relationship("Project", back_populates="git_changes")
+    message: Mapped[Optional["Message"]] = relationship(
+        "Message", back_populates="git_changes"
     )

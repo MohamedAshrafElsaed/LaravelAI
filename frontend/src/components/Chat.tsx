@@ -43,6 +43,7 @@ interface ProcessingEvent {
 interface ChatProps {
   projectId: string;
   onProcessingEvent?: (event: ProcessingEvent) => void;
+  onConversationChange?: (conversationId: string | null) => void;
 }
 
 // Detect RTL text (Arabic, Hebrew, etc.)
@@ -54,6 +55,7 @@ function isRTL(text: string): boolean {
 export function Chat({
   projectId,
   onProcessingEvent,
+  onConversationChange,
 }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -115,6 +117,11 @@ export function Chat({
     }
     loadConversations();
   }, [projectId, loadMessages, loadConversations]);
+
+  // Notify parent of conversation changes
+  useEffect(() => {
+    onConversationChange?.(conversationId);
+  }, [conversationId, onConversationChange]);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db, close_db
-from app.api import auth, health, projects, chat, github, git
+from app.api import auth, health, projects, chat, github, git, git_changes
 
 
 # Configure logging
@@ -110,6 +110,10 @@ app.include_router(
 # Git routes under /projects/{id}/...
 app.include_router(
     git.router, prefix=f"{settings.api_prefix}/projects", tags=["Git"]
+)
+# Git changes tracking routes under /projects/{id}/changes
+app.include_router(
+    git_changes.router, prefix=f"{settings.api_prefix}/projects", tags=["Git Changes"]
 )
 
 if __name__ == "__main__":

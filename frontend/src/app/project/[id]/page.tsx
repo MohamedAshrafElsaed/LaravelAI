@@ -22,6 +22,7 @@ import { Chat } from '@/components/Chat';
 import { CodeViewer } from '@/components/CodeViewer';
 import { ChangesReview } from '@/components/ChangesReview';
 import { GitPanel } from '@/components/GitPanel';
+import { GitChangesTracker } from '@/components/GitChangesTracker';
 
 interface Project {
   id: string;
@@ -54,6 +55,8 @@ export default function ProjectPage() {
 
   // AI execution results (for changes review)
   const [executionResults, setExecutionResults] = useState<any[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -108,6 +111,11 @@ export default function ProjectPage() {
 
   // Handle AI processing events
   const handleProcessingEvent = (event: any) => {
+    // Capture message_id if available
+    if (event.data?.message_id) {
+      setLastMessageId(event.data.message_id);
+    }
+
     // Check for execution results in complete event
     if (event.event === 'complete' && event.data?.execution_results) {
       setExecutionResults(event.data.execution_results);
@@ -319,6 +327,7 @@ export default function ProjectPage() {
                 <Chat
                   projectId={projectId}
                   onProcessingEvent={handleProcessingEvent}
+                  onConversationChange={setCurrentConversationId}
                 />
               )}
 
@@ -333,9 +342,15 @@ export default function ProjectPage() {
                 <ChangesReview
                   results={executionResults}
                   projectId={projectId}
+                  conversationId={currentConversationId || undefined}
+                  messageId={lastMessageId || undefined}
+                  defaultBranch={project?.default_branch || 'main'}
                   onDiscard={() => {
                     setExecutionResults([]);
                     setViewMode('chat');
+                  }}
+                  onChangeTracked={(changeId) => {
+                    console.log('Change tracked:', changeId);
                   }}
                 />
               )}
@@ -355,6 +370,11 @@ export default function ProjectPage() {
                       onPRCreated={(url) => {
                         console.log('PR created:', url);
                       }}
+                    />
+                    <GitChangesTracker
+                      projectId={projectId}
+                      conversationId={currentConversationId || undefined}
+                      defaultBranch={project?.default_branch || 'main'}
                     />
                   </div>
                 </div>

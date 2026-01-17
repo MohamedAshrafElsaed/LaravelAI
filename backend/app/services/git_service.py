@@ -60,6 +60,27 @@ class GitService:
         """
         return f"https://x-access-token:{self.github_token}@github.com/{repo_full_name}.git"
 
+    def _get_repo(self, clone_path: str) -> Repo:
+        """
+        Get the git repository object.
+
+        Args:
+            clone_path: Path to the cloned repository
+
+        Returns:
+            Git Repo object
+
+        Raises:
+            GitServiceError: If repository doesn't exist or is invalid
+        """
+        if not os.path.exists(clone_path):
+            raise GitServiceError(f"Repository not found at {clone_path}")
+
+        try:
+            return Repo(clone_path)
+        except InvalidGitRepositoryError:
+            raise GitServiceError(f"Invalid git repository at {clone_path}")
+
     def clone_repo(
         self,
         project_id: str,

@@ -144,4 +144,110 @@ export const gitApi = {
     api.get(`/projects/${projectId}/diff`, { params: { base_branch: baseBranch } }),
 };
 
+// Git changes tracking types
+export interface GitChangeFile {
+  file: string;
+  action: 'create' | 'modify' | 'delete';
+  content?: string;
+  diff?: string;
+  original_content?: string;
+}
+
+export interface GitChange {
+  id: string;
+  conversation_id: string;
+  project_id: string;
+  message_id?: string;
+  branch_name: string;
+  base_branch: string;
+  commit_hash?: string;
+  status: 'pending' | 'applied' | 'pushed' | 'pr_created' | 'pr_merged' | 'merged' | 'rolled_back' | 'discarded';
+  pr_number?: number;
+  pr_url?: string;
+  pr_state?: string;
+  title?: string;
+  description?: string;
+  files_changed?: GitChangeFile[];
+  change_summary?: string;
+  rollback_commit?: string;
+  rolled_back_at?: string;
+  rolled_back_from_status?: string;
+  created_at: string;
+  updated_at: string;
+  applied_at?: string;
+  pushed_at?: string;
+  pr_created_at?: string;
+  merged_at?: string;
+}
+
+export interface CreateGitChangeRequest {
+  conversation_id: string;
+  message_id?: string;
+  branch_name: string;
+  base_branch?: string;
+  title?: string;
+  description?: string;
+  files_changed?: GitChangeFile[];
+  change_summary?: string;
+}
+
+export interface UpdateGitChangeRequest {
+  status?: string;
+  commit_hash?: string;
+  pr_number?: number;
+  pr_url?: string;
+  pr_state?: string;
+  title?: string;
+  description?: string;
+}
+
+export interface RollbackResponse {
+  success: boolean;
+  message: string;
+  rollback_commit?: string;
+  previous_status: string;
+}
+
+export const gitChangesApi = {
+  // List all changes for a project
+  listProjectChanges: (projectId: string, params?: { status?: string; conversation_id?: string; limit?: number; offset?: number }) =>
+    api.get<GitChange[]>(`/projects/${projectId}/changes`, { params }),
+
+  // List changes for a conversation
+  listConversationChanges: (projectId: string, conversationId: string) =>
+    api.get<GitChange[]>(`/projects/${projectId}/conversations/${conversationId}/changes`),
+
+  // Get a specific change
+  getChange: (projectId: string, changeId: string) =>
+    api.get<GitChange>(`/projects/${projectId}/changes/${changeId}`),
+
+  // Create a new change record
+  createChange: (projectId: string, data: CreateGitChangeRequest) =>
+    api.post<GitChange>(`/projects/${projectId}/changes`, data),
+
+  // Update a change
+  updateChange: (projectId: string, changeId: string, data: UpdateGitChangeRequest) =>
+    api.patch<GitChange>(`/projects/${projectId}/changes/${changeId}`, data),
+
+  // Apply a pending change
+  applyChange: (projectId: string, changeId: string) =>
+    api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/apply`),
+
+  // Push an applied change
+  pushChange: (projectId: string, changeId: string) =>
+    api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/push`),
+
+  // Create PR for a change
+  createPRForChange: (projectId: string, changeId: string, params?: { title?: string; description?: string }) =>
+    api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/create-pr`, null, { params }),
+
+  // Rollback a change
+  rollbackChange: (projectId: string, changeId: string, force?: boolean) =>
+    api.post<RollbackResponse>(`/projects/${projectId}/changes/${changeId}/rollback`, { force }),
+
+  // Delete a change record
+  deleteChange: (projectId: string, changeId: string) =>
+    api.delete(`/projects/${projectId}/changes/${changeId}`),
+};
+
 export default api;

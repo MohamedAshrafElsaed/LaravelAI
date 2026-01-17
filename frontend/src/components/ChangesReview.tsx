@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { DiffViewer, DiffStats } from './DiffViewer';
-import { gitApi } from '@/lib/api';
+import { gitApi, gitChangesApi, GitChangeFile } from '@/lib/api';
 
 interface ExecutionResult {
   file: string;
@@ -33,17 +33,23 @@ interface ExecutionResult {
 interface ChangesReviewProps {
   results: ExecutionResult[];
   projectId: string;
+  conversationId?: string;
+  messageId?: string;
   defaultBranch?: string;
   onDiscard: () => void;
   onPRCreated?: (url: string) => void;
+  onChangeTracked?: (changeId: string) => void;
 }
 
 export function ChangesReview({
   results,
   projectId,
+  conversationId,
+  messageId,
   defaultBranch = 'main',
   onDiscard,
   onPRCreated,
+  onChangeTracked,
 }: ChangesReviewProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(
     results.length > 0 ? results[0].file : null
@@ -57,6 +63,7 @@ export function ChangesReview({
   const [showPRForm, setShowPRForm] = useState(false);
   const [prTitle, setPrTitle] = useState('AI-generated changes');
   const [prDescription, setPrDescription] = useState('');
+  const [trackedChangeId, setTrackedChangeId] = useState<string | null>(null);
 
   const selectedResult = results.find((r) => r.file === selectedFile);
 
@@ -139,6 +146,44 @@ export function ChangesReview({
       });
 
       setAppliedBranch(response.data.branch_name);
+
+      // Track the change in the database if we have a conversation
+      if (conversationId) {
+        try {
+          const filesChanged: GitChangeFile[] = results
+            .filter((r) => r.success)
+            .map((r) => ({
+              file: r.file,
+              action: r.action,
+              content: r.content,
+              diff: r.diff,
+              original_content: r.original_content,
+            }));
+
+          const changeResponse = await gitChangesApi.createChange(projectId, {
+            conversation_id: conversationId,
+            message_id: messageId,
+            branch_name: response.data.branch_name,
+            base_branch: defaultBranch,
+            title: `AI changes: ${changes.length} file(s) modified`,
+            files_changed: filesChanged,
+            change_summary: `Modified ${changes.length} file(s)`,
+          });
+
+          // Update the change status to applied
+          await gitChangesApi.updateChange(projectId, changeResponse.data.id, {
+            status: 'applied',
+            commit_hash: response.data.commit_hash,
+          });
+
+          setTrackedChangeId(changeResponse.data.id);
+          onChangeTracked?.(changeResponse.data.id);
+        } catch (trackErr) {
+          console.warn('Failed to track change:', trackErr);
+          // Continue even if tracking fails
+        }
+      }
+
       setShowPRForm(true);
     } catch (err: any) {
       console.error('Failed to apply changes:', err);
@@ -171,6 +216,22 @@ export function ChangesReview({
       setPrUrl(response.data.url);
       setShowPRForm(false);
       onPRCreated?.(response.data.url);
+
+      // Update the tracked change with PR info
+      if (trackedChangeId) {
+        try {
+          await gitChangesApi.updateChange(projectId, trackedChangeId, {
+            status: 'pr_created',
+            pr_number: response.data.number,
+            pr_url: response.data.url,
+            pr_state: response.data.state,
+            title: prTitle,
+            description: prDescription,
+          });
+        } catch (trackErr) {
+          console.warn('Failed to update change tracking:', trackErr);
+        }
+      }
     } catch (err: any) {
       console.error('Failed to create PR:', err);
       setError(err.response?.data?.detail || 'Failed to create pull request');
