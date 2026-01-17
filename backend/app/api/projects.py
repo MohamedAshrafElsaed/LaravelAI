@@ -30,6 +30,7 @@ from app.services.vector_store import VectorStore
 from app.services.stack_detector import StackDetector
 from app.services.file_scanner import FileScanner
 from app.services.health_checker import HealthChecker
+from app.services.ai_context_generator import AIContextGenerator
 
 router = APIRouter()
 
@@ -1029,6 +1030,20 @@ async def scan_project_task(
 
             await db.commit()
             logger.info(f"[SCAN_TASK] Saved {len(issues)} issues")
+
+            # ========== PHASE 5: Generate AI Context (95%) ==========
+            logger.info(f"[SCAN_TASK] Phase 5: Generating AI context")
+            project.scan_progress = 90
+            project.scan_message = "Generating AI context..."
+            await db.commit()
+
+            ai_generator = AIContextGenerator(project.clone_path, stack, file_stats, structure)
+            ai_context = ai_generator.generate()
+            project.ai_context = ai_context
+            project.scan_progress = 95
+            await db.commit()
+
+            logger.info(f"[SCAN_TASK] AI context generated")
 
             # ========== COMPLETE ==========
             project.scan_progress = 100
