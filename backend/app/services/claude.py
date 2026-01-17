@@ -289,6 +289,7 @@ class ClaudeService:
         max_tokens: int = 4096,
         temperature: float = 0.7,
         request_type: str = "chat",
+        use_cache: bool = True,
     ) -> str:
         """
         Send an async chat request and get a response with automatic tracking.
@@ -300,16 +301,19 @@ class ClaudeService:
             max_tokens: Maximum tokens in response
             temperature: Sampling temperature (0-1)
             request_type: Type of request for tracking (intent, planning, execution, validation, chat)
+            use_cache: Enable prompt caching for system prompt (default: True)
 
         Returns:
             The assistant's response text
         """
         model_id = model.value if isinstance(model, ClaudeModel) else model
-        logger.info(f"[CLAUDE] Async chat request - model={model_id}, messages={len(messages)}, type={request_type}")
+        logger.info(f"[CLAUDE] Async chat request - model={model_id}, messages={len(messages)}, type={request_type}, cache={use_cache}")
 
         start_time = time.time()
         input_tokens = 0
         output_tokens = 0
+        cache_creation_input_tokens = 0
+        cache_read_input_tokens = 0
         content = ""
         status = "success"
         error_message = None
@@ -321,8 +325,19 @@ class ClaudeService:
                 "temperature": temperature,
                 "messages": messages,
             }
+
+            # Use cache_control for system prompt when caching is enabled
             if system:
-                kwargs["system"] = system
+                if use_cache:
+                    kwargs["system"] = [
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ]
+                else:
+                    kwargs["system"] = system
 
             response = await self.async_client.messages.create(**kwargs)
 
@@ -330,7 +345,11 @@ class ClaudeService:
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
 
-            logger.info(f"[CLAUDE] Response received - tokens: input={input_tokens}, output={output_tokens}")
+            # Get cache stats from response
+            cache_creation_input_tokens = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
+            cache_read_input_tokens = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
+
+            logger.info(f"[CLAUDE] Response received - tokens: input={input_tokens}, output={output_tokens}, cache_read={cache_read_input_tokens}, cache_write={cache_creation_input_tokens}")
 
             return content
 
@@ -342,6 +361,51 @@ class ClaudeService:
 
         finally:
             latency_ms = int((time.time() - start_time) * 1000)
+
+            # Calculate cache savings
+            cache_hit = cache_read_input_tokens > 0
+            tokens_saved = cache_read_input_tokens if cache_hit else 0
+
+            # Cache pricing is 90% cheaper for cached tokens
+            model_pricing = {
+                "claude-sonnet-4-5-20250929": {"input": 3.0, "cached": 0.30},
+                "claude-haiku-4-5-20251001": {"input": 0.80, "cached": 0.08},
+            }.get(model_id, {"input": 3.0, "cached": 0.30})
+
+            # Calculate cost saved
+            cost_saved = (tokens_saved / 1_000_000) * (model_pricing["input"] - model_pricing["cached"])
+
+            # Log to operations logger with cache info
+            ops_logger = _get_ops_logger()
+            if ops_logger:
+                cost = self._calculate_cost(model_id, input_tokens, output_tokens)
+
+                if cache_hit:
+                    ops_logger.log_cache_hit(
+                        tokens_saved=tokens_saved,
+                        cost_saved=cost_saved,
+                        user_id=self.user_id,
+                        project_id=self.project_id,
+                    )
+                elif cache_creation_input_tokens > 0:
+                    ops_logger.log_cache_miss(
+                        user_id=self.user_id,
+                        project_id=self.project_id,
+                    )
+
+                ops_logger.log_api_call(
+                    model=model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=cost,
+                    duration_ms=latency_ms,
+                    request_type=request_type,
+                    cache_hit=cache_hit,
+                    cache_tokens_saved=tokens_saved,
+                    cache_cost_saved=cost_saved,
+                    user_id=self.user_id,
+                    project_id=self.project_id,
+                )
 
             # Track usage asynchronously
             await self._track_usage(
