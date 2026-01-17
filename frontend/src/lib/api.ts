@@ -14,13 +14,20 @@ interface RetryConfig {
 }
 
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  retries: 3,
+  retries: 2, // Reduced from 3 to avoid long waits
   retryDelay: 1000, // Start with 1 second
   retryCondition: (error: AxiosError) => {
-    // Retry on network errors or 5xx server errors
-    if (!error.response) return true; // Network error
+    // Don't retry if no response (network error) - usually means server is down
+    // Retrying won't help if the server isn't responding
+    if (!error.response) {
+      // Only retry network errors once, not multiple times
+      const config = error.config as InternalAxiosRequestConfig & { __retryCount?: number };
+      return (config?.__retryCount || 0) < 1;
+    }
     const status = error.response.status;
-    return status >= 500 || status === 429; // Server error or rate limited
+    // Only retry on 429 (rate limit) or 503 (service unavailable)
+    // Don't retry on general 5xx as they're usually app errors
+    return status === 429 || status === 503;
   },
 };
 

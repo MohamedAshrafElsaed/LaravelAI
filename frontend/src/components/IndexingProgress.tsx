@@ -8,7 +8,7 @@ import { projectsApi, getErrorMessage } from '@/lib/api';
 
 interface IndexingProgressProps {
   projectId: string;
-  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
+  status: 'pending' | 'cloning' | 'indexing' | 'scanning' | 'analyzing' | 'ready' | 'error';
   errorMessage?: string | null;
   onStatusChange?: (status: string) => void;
   compact?: boolean;
@@ -212,26 +212,28 @@ export function IndexingBadge({
   status,
   progress,
 }: {
-  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
+  status: 'pending' | 'cloning' | 'indexing' | 'scanning' | 'analyzing' | 'ready' | 'error';
   progress?: number;
 }) {
-  const styles = {
+  const styles: Record<string, string> = {
     pending: 'bg-yellow-500/10 text-yellow-500',
     cloning: 'bg-purple-500/10 text-purple-500',
     indexing: 'bg-blue-500/10 text-blue-500',
+    scanning: 'bg-cyan-500/10 text-cyan-500',
+    analyzing: 'bg-indigo-500/10 text-indigo-500',
     ready: 'bg-green-500/10 text-green-500',
     error: 'bg-red-500/10 text-red-500',
   };
 
-  const isInProgress = status === 'cloning' || status === 'indexing';
+  const isInProgress = status === 'cloning' || status === 'indexing' || status === 'scanning' || status === 'analyzing';
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${styles[status]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${styles[status] || styles.pending}`}>
       {isInProgress && (
         <Loader2 className="h-3 w-3 animate-spin" />
       )}
       {status}
-      {status === 'indexing' && progress !== undefined && (
+      {(status === 'indexing' || status === 'scanning' || status === 'analyzing') && progress !== undefined && (
         <span className="font-bold">{Math.round(progress)}%</span>
       )}
     </span>

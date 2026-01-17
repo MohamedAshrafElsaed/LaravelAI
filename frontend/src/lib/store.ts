@@ -15,7 +15,7 @@ interface Project {
   name?: string;
   repo_full_name: string;
   repo_url: string;
-  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
+  status: 'pending' | 'cloning' | 'indexing' | 'scanning' | 'analyzing' | 'ready' | 'error';
   indexed_files_count: number;
   laravel_version: string | null;
   error_message?: string | null;

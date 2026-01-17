@@ -15,7 +15,7 @@ interface Project {
   name?: string;
   repo_full_name: string;
   repo_url: string;
-  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
+  status: 'pending' | 'cloning' | 'indexing' | 'scanning' | 'analyzing' | 'ready' | 'error';
   indexed_files_count: number;
   laravel_version: string | null;
   error_message?: string | null;
@@ -49,8 +49,11 @@ export default function Dashboard() {
   const [addingRepoId, setAddingRepoId] = useState<number | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const fetchProjects = useCallback(async (showRefreshToast = false) => {
     try {
+      setLoadError(null);
       const response = await projectsApi.list();
       setProjects(response.data);
       if (showRefreshToast) {
@@ -58,7 +61,14 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Failed to fetch projects:', error);
-      toast.error('Failed to load projects', getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setLoadError(message);
+      if (!showRefreshToast) {
+        // Only show toast on manual refresh, not initial load
+        // to avoid double error display
+      } else {
+        toast.error('Failed to load projects', message);
+      }
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -84,41 +94,60 @@ export default function Dashboard() {
 
   // Polling for in-progress projects (cloning or indexing)
   const { updateProject } = useProjectsStore();
+  const [pollErrorCount, setPollErrorCount] = useState(0);
 
   useEffect(() => {
     // Check if there are any projects in progress
     const inProgressProjects = projects.filter(
-      (p) => p.status === 'cloning' || p.status === 'indexing'
+      (p) => p.status === 'cloning' || p.status === 'indexing' || p.status === 'scanning' || p.status === 'analyzing'
     );
 
     if (inProgressProjects.length === 0 || !isHydrated || !isAuthenticated) {
       return;
     }
 
-    // Poll every 2 seconds for status updates
-    const pollInterval = setInterval(async () => {
+    // Back off polling when errors occur
+    // Base interval is 3 seconds, increases with errors (max 30 seconds)
+    const pollInterval = Math.min(3000 * Math.pow(2, pollErrorCount), 30000);
+    let isPolling = false; // Prevent overlapping polls
+
+    const poll = async () => {
+      if (isPolling) return; // Skip if previous poll is still running
+      isPolling = true;
+
+      let hasError = false;
       for (const project of inProgressProjects) {
         try {
           const response = await projectsApi.get(project.id);
           const updatedProject = response.data;
 
-          // Only update if status changed
-          if (updatedProject.status !== project.status) {
-            updateProject(project.id, {
-              status: updatedProject.status,
-              indexed_files_count: updatedProject.indexed_files_count,
-              laravel_version: updatedProject.laravel_version,
-              error_message: updatedProject.error_message,
-            });
-          }
+          // Update project state
+          updateProject(project.id, {
+            status: updatedProject.status,
+            indexed_files_count: updatedProject.indexed_files_count,
+            laravel_version: updatedProject.laravel_version,
+            error_message: updatedProject.error_message,
+          });
         } catch (error) {
           console.error(`Failed to poll project ${project.id}:`, error);
+          hasError = true;
         }
       }
-    }, 2000);
 
-    return () => clearInterval(pollInterval);
-  }, [projects, isHydrated, isAuthenticated, updateProject]);
+      // Reset or increment error count based on success/failure
+      if (hasError) {
+        setPollErrorCount(c => Math.min(c + 1, 5)); // Cap at 5 (30s interval)
+      } else {
+        setPollErrorCount(0); // Reset on success
+      }
+
+      isPolling = false;
+    };
+
+    const intervalId = setInterval(poll, pollInterval);
+
+    return () => clearInterval(intervalId);
+  }, [projects, isHydrated, isAuthenticated, updateProject, pollErrorCount]);
 
   const fetchGitHubRepos = useCallback(async () => {
     setReposLoading(true);
@@ -262,6 +291,36 @@ export default function Dashboard() {
             {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonProjectCard key={i} />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="mt-6 rounded-lg border border-red-900/50 bg-red-900/20 p-8 text-center">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="mx-auto h-12 w-12 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <h3 className="mt-4 text-lg font-medium text-red-400">Failed to load projects</h3>
+            <p className="mt-2 text-sm text-gray-400">{loadError}</p>
+            <p className="mt-1 text-xs text-gray-500">Make sure the backend server is running.</p>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={handleRefresh}
+              loading={isRefreshing}
+              leftIcon={<RefreshCw className="h-4 w-4" />}
+              className="mt-4"
+            >
+              Try Again
+            </Button>
           </div>
         ) : projects.length === 0 ? (
           <div className="mt-6 rounded-lg border-2 border-dashed border-gray-700 p-12 text-center">
