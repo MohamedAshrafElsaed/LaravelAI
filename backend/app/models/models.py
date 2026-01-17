@@ -88,7 +88,13 @@ class Project(Base):
 
     # Indexing status
     status: Mapped[ProjectStatus] = mapped_column(
-        SQLEnum(ProjectStatus), default=ProjectStatus.PENDING
+        SQLEnum(
+            ProjectStatus,
+            values_callable=lambda x: [e.value for e in x],
+            name="projectstatus",
+            create_type=False,  # Don't recreate the type, use existing
+        ),
+        default=ProjectStatus.PENDING
     )
     last_indexed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
