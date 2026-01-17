@@ -27,26 +27,11 @@ def safe_format(template: str, **kwargs) -> str:
         result = result.replace(placeholder, str(value))
     return result
 
-VALIDATION_PROMPT = """<role>
+
+# SYSTEM prompt - static, cacheable for 90% cost reduction
+VALIDATION_SYSTEM_PROMPT = """<role>
 You are a senior Laravel code reviewer and quality assurance expert. Your validation directly determines whether code ships to production, so thoroughness and accuracy are critical. You have deep expertise in Laravel conventions, PHP best practices, security vulnerabilities, and code quality standards.
 </role>
-
-<validation_context>
-<user_request>{user_input}</user_request>
-<intent>
-- Task Type: {task_type}
-- Scope: {scope}
-- Domains: {domains}
-</intent>
-</validation_context>
-
-<generated_changes>
-{changes}
-</generated_changes>
-
-<codebase_reference>
-{context}
-</codebase_reference>
 
 <validation_criteria>
 Review the code against each criterion. Mark PASS, FAIL, or N/A for each.
@@ -166,91 +151,91 @@ Score based on the criteria results:
 <example_excellent>
 <scenario>Controller with proper validation, service injection, type hints</scenario>
 <result>
-{{
+{
   "approved": true,
   "score": 96,
   "issues": [
-    {{
+    {
       "severity": "info",
       "file": "app/Http/Controllers/OrderController.php",
       "line": 45,
       "message": "Consider adding rate limiting to this endpoint"
-    }}
+    }
   ],
   "suggestions": ["Consider adding API resource for response formatting"],
   "summary": "Excellent implementation following Laravel conventions. All criteria pass with minor suggestions."
-}}
+}
 </result>
 </example_excellent>
 
 <example_needs_fix>
 <scenario>Controller missing use statement and validation</scenario>
 <result>
-{{
+{
   "approved": false,
   "score": 58,
   "issues": [
-    {{
+    {
       "severity": "error",
       "file": "app/Http/Controllers/UserController.php",
       "line": 12,
       "message": "Missing use statement: App\\Services\\UserService is referenced but not imported"
-    }},
-    {{
+    },
+    {
       "severity": "error",
       "file": "app/Http/Controllers/UserController.php",
       "line": 28,
       "message": "No input validation - user data used directly without validation"
-    }},
-    {{
+    },
+    {
       "severity": "warning",
       "file": "app/Http/Controllers/UserController.php",
       "line": 35,
       "message": "Method lacks return type hint"
-    }}
+    }
   ],
   "suggestions": ["Create a StoreUserRequest form request for validation"],
   "summary": "Code has 2 errors blocking approval: missing import and no input validation. Fix these issues before deployment."
-}}
+}
 </result>
 </example_needs_fix>
 
 <example_security_fail>
 <scenario>Code with SQL injection vulnerability</scenario>
 <result>
-{{
+{
   "approved": false,
   "score": 25,
   "issues": [
-    {{
+    {
       "severity": "error",
       "file": "app/Services/SearchService.php",
       "line": 42,
       "message": "CRITICAL SECURITY: SQL injection vulnerability - user input concatenated into raw query. Use parameterized queries: DB::select('SELECT * FROM users WHERE name = ?', [$name])"
-    }}
+    }
   ],
   "suggestions": ["Use Eloquent query builder or parameterized queries for all database operations"],
   "summary": "REJECTED: Critical SQL injection vulnerability detected. This code MUST NOT be deployed."
-}}
+}
 </result>
 </example_security_fail>
 </examples>
 
 <output_format>
-{{
+{
   "approved": boolean,
   "score": number (0-100),
   "issues": [
-    {{
+    {
       "severity": "error" | "warning" | "info",
       "file": "path/to/file.php",
       "line": number | null,
       "message": "Clear description of the issue and how to fix it"
-    }}
+    }
   ],
   "suggestions": ["Improvement suggestions not tied to specific issues"],
   "summary": "One paragraph summarizing validation result and key findings"
-}}
+}
 
 RULES:
 - approved=true ONLY if zero "error" severity issues
@@ -270,6 +255,24 @@ Before responding, verify:
 </verification>
 
 Respond ONLY with the JSON object."""
+
+# USER prompt template - dynamic, contains the actual request and context
+VALIDATION_USER_PROMPT = """<validation_context>
+<user_request>{user_input}</user_request>
+<intent>
+- Task Type: {task_type}
+- Scope: {scope}
+- Domains: {domains}
+</intent>
+</validation_context>
+
+<generated_changes>
+{changes}
+</generated_changes>
+
+<codebase_reference>
+{context}
+</codebase_reference>"""
 
 
 @dataclass
@@ -409,8 +412,9 @@ class Validator:
         # Format changes for review
         changes_str = self._format_changes(results)
 
-        prompt = safe_format(
-            VALIDATION_PROMPT,
+        # Build user prompt with dynamic content
+        user_prompt = safe_format(
+            VALIDATION_USER_PROMPT,
             user_input=user_input,
             task_type=intent.task_type,
             scope=intent.scope,
@@ -419,12 +423,14 @@ class Validator:
             context=context.to_prompt_string()[:10000],  # Limit context size
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        # Using system parameter for caching - the static system prompt gets cached
+        messages = [{"role": "user", "content": user_prompt}]
 
         try:
             response = await self.claude.chat_async(
                 model=ClaudeModel.SONNET,
                 messages=messages,
+                system=VALIDATION_SYSTEM_PROMPT,  # Static prompt - gets cached!
                 temperature=0.3,
                 max_tokens=4096,
                 request_type="validation",

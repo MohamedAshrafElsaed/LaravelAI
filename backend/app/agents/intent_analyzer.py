@@ -24,7 +24,10 @@ def safe_format(template: str, **kwargs) -> str:
         result = result.replace(placeholder, str(value))
     return result
 
-INTENT_ANALYSIS_PROMPT = """<role>
+
+# SYSTEM prompt - static, cacheable (role, rules, examples, format)
+# This gets cached by Claude's prompt caching for 90% cost reduction
+INTENT_SYSTEM_PROMPT = """<role>
 You are an expert Laravel architect specializing in understanding developer requests and translating them into actionable technical specifications. Your analysis directly determines which code changes will be made, so accuracy is critical.
 </role>
 
@@ -44,14 +47,6 @@ Question indicators ONLY (use task_type="question"):
 
 If in doubt between action and question, ALWAYS choose action (feature/bugfix/refactor).
 </critical_classification_rule>
-
-<project_info>
-{project_context}
-</project_info>
-
-<user_request>
-{user_input}
-</user_request>
 
 <instructions>
 Analyze the user's request and extract structured information. Think through:
@@ -83,28 +78,28 @@ Respond with a JSON object containing:
 <example>
 <input>The login form shows "invalid credentials" even when I enter the correct password</input>
 <output>
-{{
+{
   "task_type": "bugfix",
   "domains_affected": ["auth", "validation"],
   "scope": "single_file",
   "languages": ["php"],
   "requires_migration": false,
   "search_queries": ["LoginController", "AuthenticatesUsers", "attempt", "credentials", "validateLogin"]
-}}
+}
 </output>
 </example>
 
 <example>
 <input>Add a feature to export user orders as PDF with filtering by date range</input>
 <output>
-{{
+{
   "task_type": "feature",
   "domains_affected": ["controllers", "services", "views", "routing"],
   "scope": "feature",
   "languages": ["php", "blade"],
   "requires_migration": false,
   "search_queries": ["OrderController", "Order", "export", "PDF", "OrderService"]
-}}
+}
 </output>
 </example>
 
@@ -112,14 +107,14 @@ Respond with a JSON object containing:
 <input>I need to implement all project functions and be ready</input>
 <reasoning>This is an ACTION request (contains "implement", "need to"). Even though vague, it's NOT a question.</reasoning>
 <output>
-{{
+{
   "task_type": "feature",
   "domains_affected": ["controllers", "services", "models", "routing", "validation"],
   "scope": "cross_domain",
   "languages": ["php", "vue", "ts"],
   "requires_migration": false,
   "search_queries": ["Controller", "Service", "Model", "routes", "incomplete", "TODO"]
-}}
+}
 </output>
 </example>
 
@@ -127,14 +122,14 @@ Respond with a JSON object containing:
 <input>ok start</input>
 <reasoning>Short affirmation following a previous conversation - likely wanting to proceed with implementation. Treat as feature continuation.</reasoning>
 <output>
-{{
+{
   "task_type": "feature",
   "domains_affected": ["controllers", "services"],
   "scope": "feature",
   "languages": ["php"],
   "requires_migration": false,
   "search_queries": ["Controller", "Service", "implementation", "create", "store"]
-}}
+}
 </output>
 </example>
 
@@ -142,14 +137,14 @@ Respond with a JSON object containing:
 <input>How does the payment processing work in this app?</input>
 <reasoning>This is asking FOR INFORMATION, not requesting action. Clear question.</reasoning>
 <output>
-{{
+{
   "task_type": "question",
   "domains_affected": ["payment", "services"],
   "scope": "single_file",
   "languages": ["php"],
   "requires_migration": false,
   "search_queries": ["PaymentService", "PaymentController", "stripe", "charge", "processPayment"]
-}}
+}
 </output>
 </example>
 
@@ -157,14 +152,14 @@ Respond with a JSON object containing:
 <input>What's in the User model?</input>
 <reasoning>Asking for information about existing code - this IS a question.</reasoning>
 <output>
-{{
+{
   "task_type": "question",
   "domains_affected": ["models"],
   "scope": "single_file",
   "languages": ["php"],
   "requires_migration": false,
   "search_queries": ["User", "Model", "fillable", "relationships", "User.php"]
-}}
+}
 </output>
 </example>
 </examples>
@@ -178,7 +173,16 @@ Before responding, verify:
 5. Your JSON is valid and all fields are populated
 </verification>
 
-Respond ONLY with the JSON object, no additional text."""
+Respond ONLY with the JSON object."""
+
+# USER prompt template - dynamic, contains the actual request
+INTENT_USER_PROMPT = """<project_info>
+{project_context}
+</project_info>
+
+<user_request>
+{user_input}
+</user_request>"""
 
 
 @dataclass
@@ -253,21 +257,23 @@ class IntentAnalyzer:
         """
         logger.info(f"[INTENT_ANALYZER] Analyzing input: {user_input[:100]}...")
 
-        # Build the prompt
+        # Build the user prompt with dynamic content
         context = project_context or "Laravel project (no additional context provided)"
-        prompt = safe_format(
-            INTENT_ANALYSIS_PROMPT,
+        user_prompt = safe_format(
+            INTENT_USER_PROMPT,
             project_context=context,
             user_input=user_input,
         )
 
         # Call Claude Haiku for fast analysis
-        messages = [{"role": "user", "content": prompt}]
+        # Using system parameter for caching - the static system prompt gets cached
+        messages = [{"role": "user", "content": user_prompt}]
 
         try:
             response = await self.claude.chat_async(
                 model=ClaudeModel.HAIKU,
                 messages=messages,
+                system=INTENT_SYSTEM_PROMPT,  # Static prompt - gets cached!
                 temperature=0.3,  # Lower temperature for more consistent output
                 max_tokens=1024,
                 request_type="intent",

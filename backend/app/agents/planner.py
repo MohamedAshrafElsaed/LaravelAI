@@ -79,31 +79,16 @@ def safe_format(template: str, **kwargs) -> str:
         result = result.replace(placeholder, str(value))
     return result
 
-PLANNING_PROMPT = """<role>
+
+# SYSTEM prompt - static, cacheable (role, guidelines, examples, format)
+# This gets cached by Claude's prompt caching for 90% cost reduction
+PLANNING_SYSTEM_PROMPT = """<role>
 You are a senior Laravel architect creating implementation plans. Your plans directly drive code generation, so they must be precise, complete, and correctly ordered. A well-structured plan prevents compilation errors and ensures dependencies are created before they're needed.
 </role>
 
 <default_to_action>
 Create a complete, actionable plan. Include all files that need to be created or modified. Don't leave steps vague - be specific about what each file should contain or how it should change.
 </default_to_action>
-
-<task_context>
-<user_request>{user_input}</user_request>
-<intent>
-- Task Type: {task_type}
-- Scope: {scope}
-- Domains Affected: {domains}
-- Requires Migration: {requires_migration}
-</intent>
-</task_context>
-
-<project_info>
-{project_context}
-</project_info>
-
-<codebase_context>
-{context}
-</codebase_context>
 
 <planning_guidelines>
 Think through the logical order of operations before creating your plan:
@@ -138,93 +123,93 @@ Think through the logical order of operations before creating your plan:
 </planning_guidelines>
 
 <output_format>
-{{
+{
   "summary": "One sentence describing what this plan accomplishes",
   "steps": [
-    {{
+    {
       "order": 1,
       "action": "create" | "modify" | "delete",
       "file": "full/path/to/File.php",
       "description": "Specific description of what to create/change"
-    }}
+    }
   ]
-}}
+}
 </output_format>
 
 <examples>
 <example_simple>
 <request>Add a method to check if a user's subscription is active</request>
 <plan>
-{{
+{
   "summary": "Add isSubscriptionActive() method to User model",
   "steps": [
-    {{
+    {
       "order": 1,
       "action": "modify",
       "file": "app/Models/User.php",
       "description": "Add isSubscriptionActive() method that checks if subscription_ends_at is in the future and status is 'active'"
-    }}
+    }
   ]
-}}
+}
 </plan>
 </example_simple>
 
 <example_complex>
 <request>Create a product reviews feature where users can rate products 1-5 stars and leave comments</request>
 <plan>
-{{
+{
   "summary": "Create complete product review system with ratings and comments",
   "steps": [
-    {{
+    {
       "order": 1,
       "action": "create",
       "file": "database/migrations/2024_01_15_000001_create_reviews_table.php",
       "description": "Create reviews table with: id, user_id (foreign), product_id (foreign), rating (tinyint 1-5), comment (text nullable), timestamps. Add indexes on user_id, product_id, and rating"
-    }},
-    {{
+    },
+    {
       "order": 2,
       "action": "create",
       "file": "app/Models/Review.php",
       "description": "Create Review model with fillable [user_id, product_id, rating, comment], belongsTo relationships to User and Product, rating validation accessor"
-    }},
-    {{
+    },
+    {
       "order": 3,
       "action": "modify",
       "file": "app/Models/Product.php",
       "description": "Add hasMany relationship to Review, add averageRating() method that calculates mean rating, add reviewsCount() method"
-    }},
-    {{
+    },
+    {
       "order": 4,
       "action": "modify",
       "file": "app/Models/User.php",
       "description": "Add hasMany relationship to Review"
-    }},
-    {{
+    },
+    {
       "order": 5,
       "action": "create",
       "file": "app/Http/Requests/StoreReviewRequest.php",
       "description": "Create form request with validation: rating required|integer|between:1,5, comment nullable|string|max:1000. Add authorization check that user hasn't already reviewed this product"
-    }},
-    {{
+    },
+    {
       "order": 6,
       "action": "create",
       "file": "app/Http/Resources/ReviewResource.php",
       "description": "Create API resource exposing id, rating, comment, user (name only), created_at formatted"
-    }},
-    {{
+    },
+    {
       "order": 7,
       "action": "create",
       "file": "app/Http/Controllers/Api/ReviewController.php",
       "description": "Create controller with index (list product reviews with pagination), store (create review), update (edit own review), destroy (delete own review) methods"
-    }},
-    {{
+    },
+    {
       "order": 8,
       "action": "modify",
       "file": "routes/api.php",
       "description": "Add resource route for reviews nested under products: Route::apiResource('products.reviews', ReviewController::class)"
-    }}
+    }
   ]
-}}
+}
 </plan>
 </example_complex>
 </examples>
@@ -239,6 +224,25 @@ Before finalizing your plan, verify:
 </verification>
 
 Respond ONLY with the JSON object."""
+
+# USER prompt template - dynamic, contains the actual request and context
+PLANNING_USER_PROMPT = """<task_context>
+<user_request>{user_input}</user_request>
+<intent>
+- Task Type: {task_type}
+- Scope: {scope}
+- Domains Affected: {domains}
+- Requires Migration: {requires_migration}
+</intent>
+</task_context>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context}
+</codebase_context>"""
 
 
 @dataclass
@@ -352,9 +356,9 @@ class Planner:
         """
         logger.info(f"[PLANNER] Creating plan for: {user_input[:100]}...")
 
-        # Build the prompt
-        prompt = safe_format(
-            PLANNING_PROMPT,
+        # Build the user prompt with dynamic content
+        user_prompt = safe_format(
+            PLANNING_USER_PROMPT,
             user_input=user_input,
             task_type=intent.task_type,
             scope=intent.scope,
@@ -364,12 +368,14 @@ class Planner:
             context=context.to_prompt_string(),
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        # Using system parameter for caching - the static system prompt gets cached
+        messages = [{"role": "user", "content": user_prompt}]
 
         try:
             response = await self.claude.chat_async(
                 model=ClaudeModel.SONNET,
                 messages=messages,
+                system=PLANNING_SYSTEM_PROMPT,  # Static prompt - gets cached!
                 temperature=0.5,
                 max_tokens=4096,
                 request_type="planning",
@@ -431,6 +437,8 @@ class Planner:
         """
         logger.info(f"[PLANNER] Refining plan based on feedback")
 
+        # For refine_plan, we use a simpler prompt structure
+        # since it's less frequently called and context varies more
         prompt = f"""You are an expert Laravel developer refining an implementation plan.
 
 ## Current Plan

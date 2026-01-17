@@ -31,30 +31,18 @@ def safe_format(template: str, **kwargs) -> str:
         result = result.replace(placeholder, str(value))
     return result
 
-EXECUTION_PROMPT_CREATE = """<role>
+
+# =============================================================================
+# SYSTEM PROMPTS - Static, cacheable for 90% cost reduction
+# =============================================================================
+
+EXECUTION_SYSTEM_CREATE = """<role>
 You are an expert Laravel developer creating production-ready code. Your code will be directly added to the codebase, so it must be complete, correct, and follow all project conventions.
 </role>
 
 <default_to_action>
 Generate complete, working code. Go beyond the basics to create a fully-featured implementation including proper error handling, validation, and edge cases. Don't generate placeholder code or TODOs.
 </default_to_action>
-
-<task>
-<description>{description}</description>
-<file_path>{file_path}</file_path>
-</task>
-
-<project_info>
-{project_context}
-</project_info>
-
-<codebase_context>
-{context}
-</codebase_context>
-
-<previous_steps>
-{previous_results}
-</previous_steps>
 
 <code_guidelines>
 Generate a complete, production-ready file following these standards:
@@ -103,7 +91,7 @@ use Illuminate\\Support\\Facades\\Log;
  * Handles payment processing for orders.
  */
 class PaymentService
-{{
+{
     /**
      * Process a payment for an order.
      *
@@ -113,20 +101,12 @@ class PaymentService
      * @throws PaymentFailedException
      */
     public function processPayment(Order $order, array $paymentDetails): Payment
-    {{
+    {
         // Implementation...
-    }}
-}}
+    }
+}
 ```
 </example>
-
-<output_format>
-{{
-  "file": "{file_path}",
-  "action": "create",
-  "content": "complete file content as a properly escaped string"
-}}
-</output_format>
 
 <verification>
 Before responding, verify:
@@ -141,36 +121,13 @@ Before responding, verify:
 
 Respond ONLY with the JSON object."""
 
-EXECUTION_PROMPT_MODIFY = """<role>
+EXECUTION_SYSTEM_MODIFY = """<role>
 You are an expert Laravel developer making precise modifications to existing code. Your changes will appear in a code review diff, so make targeted changes that are easy to review and understand.
 </role>
 
 <default_to_action>
 Make targeted, minimal changes while ensuring the modification is complete and production-ready. Do not over-engineer or add unnecessary abstractions. Do not refactor unrelated code.
 </default_to_action>
-
-<task>
-<description>{description}</description>
-<file_path>{file_path}</file_path>
-</task>
-
-<current_code>
-```php
-{current_content}
-```
-</current_code>
-
-<project_info>
-{project_context}
-</project_info>
-
-<codebase_context>
-{context}
-</codebase_context>
-
-<previous_steps>
-{previous_results}
-</previous_steps>
 
 <modification_guidelines>
 **CRITICAL: Preserve Existing Code**
@@ -224,23 +181,13 @@ Then add your method with the SAME style:
  * Check if the user has an active subscription.
  */
 public function hasActiveSubscription(): bool
-{{
+{
     return $this->subscription_ends_at !== null
         && $this->subscription_ends_at->isFuture()
         && $this->subscription_status === 'active';
-}}
+}
 ```
 </example>
-
-<output_format>
-{{
-  "file": "{file_path}",
-  "action": "modify",
-  "content": "COMPLETE file content after modifications"
-}}
-
-IMPORTANT: Content must include the ENTIRE file, not just the changes.
-</output_format>
 
 <verification>
 Before responding, verify:
@@ -252,22 +199,13 @@ Before responding, verify:
 6. JSON is valid and content is properly escaped
 </verification>
 
+IMPORTANT: Content must include the ENTIRE file, not just the changes.
+
 Respond ONLY with the JSON object."""
 
-EXECUTION_PROMPT_DELETE = """<role>
+EXECUTION_SYSTEM_DELETE = """<role>
 You are an expert Laravel developer confirming a safe file deletion. Deletions are destructive and irreversible, so careful verification is critical.
 </role>
-
-<task>
-<description>{description}</description>
-<file_path>{file_path}</file_path>
-</task>
-
-<current_code>
-```php
-{current_content}
-```
-</current_code>
 
 <deletion_safety_checks>
 Before confirming deletion, verify:
@@ -280,37 +218,11 @@ Before confirming deletion, verify:
 If ANY safety check fails, set "safe_to_delete" to false.
 </deletion_safety_checks>
 
-<output_format>
-{{
-  "file": "{file_path}",
-  "action": "delete",
-  "content": "",
-  "safe_to_delete": true | false,
-  "reason": "Explanation of why this file should/shouldn't be deleted",
-  "potential_issues": ["List any files that might reference this one"]
-}}
-</output_format>
-
 Respond ONLY with the JSON object."""
 
-SELF_VERIFICATION_PROMPT = """<role>
+SELF_VERIFICATION_SYSTEM = """<role>
 You are a code reviewer performing a quick verification check on generated code.
 </role>
-
-<task>
-Verify the following generated code for common issues before it gets applied.
-</task>
-
-<file_info>
-<file_path>{file_path}</file_path>
-<action>{action}</action>
-</file_info>
-
-<generated_code>
-```{language}
-{content}
-```
-</generated_code>
 
 <quick_checks>
 Perform these checks (respond quickly - this is a fast verification):
@@ -324,32 +236,49 @@ Perform these checks (respond quickly - this is a fast verification):
 7. **Complete**: Does the code look complete (no truncation)?
 </quick_checks>
 
-<output_format>
-{{
-  "passes_verification": true | false,
-  "issues": ["List of critical issues found, empty if none"],
-  "confidence": "high" | "medium" | "low"
-}}
-</output_format>
-
 Respond ONLY with the JSON object. Be quick and focused."""
 
-ERROR_RECOVERY_PROMPT = """<role>
-You are recovering from a code generation error. Analyze what went wrong and generate corrected code.
+FIX_SYSTEM_PROMPT = """<role>
+You are an expert Laravel developer fixing specific code issues. Focus ONLY on the identified issues - do not refactor or change anything else.
 </role>
 
-<original_task>
-<description>{description}</description>
-<file_path>{file_path}</file_path>
-</original_task>
+<fix_guidelines>
+**CRITICAL: Preserve All Existing Code**
+- Keep ALL existing functionality intact
+- Only make the minimal changes needed to fix the identified issues
+- The output should contain the ENTIRE file, not just the fixes
 
-<failed_attempt>
-<error_type>{error_type}</error_type>
-<error_message>{error_message}</error_message>
-<partial_output>
-{partial_output}
-</partial_output>
-</failed_attempt>
+**For each issue:**
+1. Identify the exact location of the problem
+2. Determine the minimal fix needed
+3. Apply the fix without changing surrounding code
+4. Verify the fix doesn't break anything else
+
+**Common Laravel Fixes:**
+- Missing use statement → Add at top with other imports (keep existing imports!)
+- Missing return type → Add type hint to method signature
+- Missing docblock → Add matching existing style
+- Syntax error → Fix the specific syntax issue
+- Missing validation → Add to Form Request or inline
+- File content replaced instead of modified → Restore missing content and ADD the new code
+
+**For "Route completely replaces existing content" errors:**
+- The fix is to KEEP all existing routes AND add the new route
+- Look at the original routes/api.php content and ensure all existing routes are preserved
+
+**Do NOT:**
+- Refactor code that wasn't mentioned in issues
+- Change code style or formatting
+- Add features not requested
+- Remove functionality that works
+- Delete existing code unless explicitly requested
+</fix_guidelines>
+
+Respond ONLY with the JSON object."""
+
+ERROR_RECOVERY_SYSTEM = """<role>
+You are recovering from a code generation error. Analyze what went wrong and generate corrected code.
+</role>
 
 <recovery_strategy>
 Based on the error type, apply the appropriate fix:
@@ -375,16 +304,112 @@ Based on the error type, apply the appropriate fix:
 - Fix namespace to match file path
 </recovery_strategy>
 
+Generate the COMPLETE corrected code. Respond ONLY with the JSON object."""
+
+# =============================================================================
+# USER PROMPTS - Dynamic, contains the actual request and context
+# =============================================================================
+
+EXECUTION_USER_CREATE = """<task>
+<description>{description}</description>
+<file_path>{file_path}</file_path>
+</task>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context}
+</codebase_context>
+
+<previous_steps>
+{previous_results}
+</previous_steps>
+
 <output_format>
 {{
   "file": "{file_path}",
-  "action": "{action}",
-  "content": "complete corrected file content",
-  "recovery_notes": "Brief description of what was fixed"
+  "action": "create",
+  "content": "complete file content as a properly escaped string"
 }}
-</output_format>
+</output_format>"""
 
-Generate the COMPLETE corrected code. Respond ONLY with the JSON object."""
+EXECUTION_USER_MODIFY = """<task>
+<description>{description}</description>
+<file_path>{file_path}</file_path>
+</task>
+
+<current_code>
+```php
+{current_content}
+```
+</current_code>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context}
+</codebase_context>
+
+<previous_steps>
+{previous_results}
+</previous_steps>
+
+<output_format>
+{{
+  "file": "{file_path}",
+  "action": "modify",
+  "content": "COMPLETE file content after modifications"
+}}
+</output_format>"""
+
+EXECUTION_USER_DELETE = """<task>
+<description>{description}</description>
+<file_path>{file_path}</file_path>
+</task>
+
+<current_code>
+```php
+{current_content}
+```
+</current_code>
+
+<output_format>
+{{
+  "file": "{file_path}",
+  "action": "delete",
+  "content": "",
+  "safe_to_delete": true | false,
+  "reason": "Explanation of why this file should/shouldn't be deleted",
+  "potential_issues": ["List any files that might reference this one"]
+}}
+</output_format>"""
+
+SELF_VERIFICATION_USER = """<task>
+Verify the following generated code for common issues before it gets applied.
+</task>
+
+<file_info>
+<file_path>{file_path}</file_path>
+<action>{action}</action>
+</file_info>
+
+<generated_code>
+```{language}
+{content}
+```
+</generated_code>
+
+<output_format>
+{{
+  "passes_verification": true | false,
+  "issues": ["List of critical issues found, empty if none"],
+  "confidence": "high" | "medium" | "low"
+}}
+</output_format>"""
 
 
 @dataclass
@@ -534,8 +559,8 @@ class Executor:
         project_context: str = "",
     ) -> ExecutionResult:
         """Execute a create action."""
-        prompt = safe_format(
-            EXECUTION_PROMPT_CREATE,
+        user_prompt = safe_format(
+            EXECUTION_USER_CREATE,
             description=step.description,
             file_path=step.file,
             project_context=project_context,
@@ -543,7 +568,7 @@ class Executor:
             previous_results=previous_results,
         )
 
-        response = await self._call_claude(prompt)
+        response = await self._call_claude(user_prompt, EXECUTION_SYSTEM_CREATE)
         data = self._parse_response(response)
 
         content = data.get("content", "")
@@ -568,8 +593,8 @@ class Executor:
         project_context: str = "",
     ) -> ExecutionResult:
         """Execute a modify action."""
-        prompt = safe_format(
-            EXECUTION_PROMPT_MODIFY,
+        user_prompt = safe_format(
+            EXECUTION_USER_MODIFY,
             description=step.description,
             file_path=step.file,
             current_content=current_content,
@@ -578,7 +603,7 @@ class Executor:
             previous_results=previous_results,
         )
 
-        response = await self._call_claude(prompt)
+        response = await self._call_claude(user_prompt, EXECUTION_SYSTEM_MODIFY)
         data = self._parse_response(response)
 
         content = data.get("content", "")
@@ -601,14 +626,14 @@ class Executor:
         current_content: str,
     ) -> ExecutionResult:
         """Execute a delete action."""
-        prompt = safe_format(
-            EXECUTION_PROMPT_DELETE,
+        user_prompt = safe_format(
+            EXECUTION_USER_DELETE,
             description=step.description,
             file_path=step.file,
             current_content=current_content,
         )
 
-        response = await self._call_claude(prompt)
+        response = await self._call_claude(user_prompt, EXECUTION_SYSTEM_DELETE)
         data = self._parse_response(response)
 
         # Generate diff showing full deletion
@@ -622,13 +647,14 @@ class Executor:
             original_content=current_content,
         )
 
-    async def _call_claude(self, prompt: str) -> str:
-        """Call Claude with the prompt."""
-        messages = [{"role": "user", "content": prompt}]
+    async def _call_claude(self, user_prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Call Claude with the prompt, using system parameter for caching."""
+        messages = [{"role": "user", "content": user_prompt}]
 
         return await self.claude.chat_async(
             model=ClaudeModel.SONNET,
             messages=messages,
+            system=system_prompt,  # Static prompt - gets cached!
             temperature=0.3,  # Lower temperature for more consistent code
             max_tokens=8192,  # Allow for larger files
             request_type="execution",
@@ -723,11 +749,7 @@ This is the ORIGINAL content of the file that should be PRESERVED and ADDED TO:
 </original_file_content>
 """
 
-        prompt = f"""<role>
-You are an expert Laravel developer fixing specific code issues. Focus ONLY on the identified issues - do not refactor or change anything else.
-</role>
-
-<context>
+        user_prompt = f"""<context>
 <file>{result.file}</file>
 <action>{result.action}</action>
 </context>
@@ -746,38 +768,6 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 {context.to_prompt_string()}
 </codebase_reference>
 
-<fix_guidelines>
-**CRITICAL: Preserve All Existing Code**
-- Keep ALL existing functionality intact
-- Only make the minimal changes needed to fix the identified issues
-- The output should contain the ENTIRE file, not just the fixes
-
-**For each issue:**
-1. Identify the exact location of the problem
-2. Determine the minimal fix needed
-3. Apply the fix without changing surrounding code
-4. Verify the fix doesn't break anything else
-
-**Common Laravel Fixes:**
-- Missing use statement → Add at top with other imports (keep existing imports!)
-- Missing return type → Add type hint to method signature
-- Missing docblock → Add matching existing style
-- Syntax error → Fix the specific syntax issue
-- Missing validation → Add to Form Request or inline
-- File content replaced instead of modified → Restore missing content and ADD the new code
-
-**For "Route completely replaces existing content" errors:**
-- The fix is to KEEP all existing routes AND add the new route
-- Look at the original routes/api.php content and ensure all existing routes are preserved
-
-**Do NOT:**
-- Refactor code that wasn't mentioned in issues
-- Change code style or formatting
-- Add features not requested
-- Remove functionality that works
-- Delete existing code unless explicitly requested
-</fix_guidelines>
-
 <output_format>
 {{
   "file": "{result.file}",
@@ -785,12 +775,10 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
   "content": "complete fixed file content",
   "fixes_applied": ["Brief description of each fix made"]
 }}
-</output_format>
-
-Respond ONLY with the JSON object."""
+</output_format>"""
 
         try:
-            response = await self._call_claude(prompt)
+            response = await self._call_claude(user_prompt, FIX_SYSTEM_PROMPT)
             data = self._parse_response(response)
 
             content = data.get("content", "")
@@ -830,8 +818,8 @@ Respond ONLY with the JSON object."""
         ext = result.file.split(".")[-1] if "." in result.file else "php"
         language = "php" if ext == "php" else ext
 
-        prompt = safe_format(
-            SELF_VERIFICATION_PROMPT,
+        user_prompt = safe_format(
+            SELF_VERIFICATION_USER,
             file_path=result.file,
             action=result.action,
             language=language,
@@ -842,7 +830,8 @@ Respond ONLY with the JSON object."""
             # Use a smaller model for quick verification (could be Haiku)
             response = await self.claude.chat_async(
                 model=ClaudeModel.SONNET,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": user_prompt}],
+                system=SELF_VERIFICATION_SYSTEM,  # Static prompt - gets cached!
                 temperature=0.1,
                 max_tokens=512,
                 request_type="verification",
@@ -883,18 +872,30 @@ Respond ONLY with the JSON object."""
         """
         logger.info(f"[EXECUTOR] Attempting error recovery for {step.file}")
 
-        prompt = safe_format(
-            ERROR_RECOVERY_PROMPT,
-            description=step.description,
-            file_path=step.file,
-            error_type=error_type,
-            error_message=error_message,
-            partial_output=partial_output[:4000] if partial_output else "No output captured",
-            action=step.action,
-        )
+        user_prompt = f"""<original_task>
+<description>{step.description}</description>
+<file_path>{step.file}</file_path>
+</original_task>
+
+<failed_attempt>
+<error_type>{error_type}</error_type>
+<error_message>{error_message}</error_message>
+<partial_output>
+{partial_output[:4000] if partial_output else "No output captured"}
+</partial_output>
+</failed_attempt>
+
+<output_format>
+{{
+  "file": "{step.file}",
+  "action": "{step.action}",
+  "content": "complete corrected file content",
+  "recovery_notes": "Brief description of what was fixed"
+}}
+</output_format>"""
 
         try:
-            response = await self._call_claude(prompt)
+            response = await self._call_claude(user_prompt, ERROR_RECOVERY_SYSTEM)
             data = self._parse_response(response)
 
             content = data.get("content", "")
