@@ -16,6 +16,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Import operations logger (lazy to avoid circular imports)
+_ops_logger = None
+
+def _get_ops_logger():
+    """Lazy load operations logger."""
+    global _ops_logger
+    if _ops_logger is None:
+        try:
+            from app.services.ai_operations_logger import get_operations_logger
+            _ops_logger = get_operations_logger()
+        except ImportError:
+            pass
+    return _ops_logger
+
 
 class ClaudeModel(str, Enum):
     """Available Claude models."""
@@ -68,6 +82,19 @@ class ClaudeService:
         """Check if usage tracking is enabled."""
         return self.tracker is not None and self.user_id is not None
 
+    def _calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        """Calculate the cost of an API call based on model and tokens."""
+        # Pricing per million tokens (as of 2024)
+        pricing = {
+            "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+            "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
+        }
+
+        model_pricing = pricing.get(model, {"input": 3.0, "output": 15.0})
+        input_cost = (input_tokens / 1_000_000) * model_pricing["input"]
+        output_cost = (output_tokens / 1_000_000) * model_pricing["output"]
+        return input_cost + output_cost
+
     async def _track_usage(
         self,
         model: str,
@@ -82,6 +109,33 @@ class ClaudeService:
         error_message: Optional[str] = None,
     ) -> None:
         """Track API usage if tracking is enabled."""
+        # Always log to operations logger
+        ops_logger = _get_ops_logger()
+        if ops_logger:
+            cost = self._calculate_cost(model, input_tokens, output_tokens)
+            ops_logger.log_api_call(
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost,
+                duration_ms=latency_ms,
+                request_type=request_type,
+                user_id=self.user_id,
+                project_id=self.project_id,
+            )
+
+            if status == "error" and error_message:
+                from app.services.ai_operations_logger import OperationType
+                ops_logger.log(
+                    operation_type=OperationType.API_ERROR,
+                    message=f"API call failed: {error_message}",
+                    model=model,
+                    user_id=self.user_id,
+                    project_id=self.project_id,
+                    success=False,
+                    error=error_message,
+                )
+
         if not self._should_track():
             return
 
@@ -167,6 +221,10 @@ class ClaudeService:
         logger.info(f"[CLAUDE] Chat request - model={model_id}, messages={len(messages)}, type={request_type}")
 
         start_time = time.time()
+        input_tokens = 0
+        output_tokens = 0
+        content = ""
+        error_message = None
 
         try:
             kwargs = {
@@ -187,10 +245,40 @@ class ClaudeService:
 
             logger.info(f"[CLAUDE] Response received - tokens: input={input_tokens}, output={output_tokens}, latency={latency_ms}ms")
 
+            # Log to operations logger
+            ops_logger = _get_ops_logger()
+            if ops_logger:
+                cost = self._calculate_cost(model_id, input_tokens, output_tokens)
+                ops_logger.log_api_call(
+                    model=model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=cost,
+                    duration_ms=latency_ms,
+                    request_type=request_type,
+                    user_id=self.user_id,
+                    project_id=self.project_id,
+                )
+
             return content
 
         except Exception as e:
-            logger.error(f"[CLAUDE] Chat error: {str(e)}")
+            error_message = str(e)
+            logger.error(f"[CLAUDE] Chat error: {error_message}")
+
+            # Log error to operations logger
+            ops_logger = _get_ops_logger()
+            if ops_logger:
+                from app.services.ai_operations_logger import OperationType
+                ops_logger.log(
+                    operation_type=OperationType.API_ERROR,
+                    message=f"Sync chat error: {error_message}",
+                    model=model_id,
+                    user_id=self.user_id,
+                    project_id=self.project_id,
+                    success=False,
+                    error=error_message,
+                )
             raise
 
     async def chat_async(
