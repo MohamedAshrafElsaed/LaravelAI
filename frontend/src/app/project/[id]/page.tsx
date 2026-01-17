@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Panel,
-  PanelGroup,
-  PanelResizeHandle,
+  Group as PanelGroup,
+  Separator as PanelResizeHandle,
 } from 'react-resizable-panels';
 import {
   RefreshCw,
@@ -207,7 +207,7 @@ export default function ProjectPage() {
 
       {/* Main Content */}
       {isReady ? (
-        <PanelGroup direction="horizontal" className="flex-1">
+        <PanelGroup orientation="horizontal" className="flex-1">
           {/* File Tree Sidebar */}
           <Panel defaultSize={20} minSize={15} maxSize={35}>
             <div className="h-full border-r border-gray-800 bg-gray-900/50">
