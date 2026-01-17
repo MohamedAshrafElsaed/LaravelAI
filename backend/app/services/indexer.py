@@ -432,7 +432,7 @@ class ProjectIndexer:
                 self.db.add(indexed_file)
 
             # Update project status
-            project.status = ProjectStatus.READY
+            project.status = ProjectStatus.READY.value
             project.last_indexed_at = datetime.utcnow()
             project.indexed_files_count = len(files)
             project.error_message = None
@@ -488,7 +488,7 @@ class ProjectIndexer:
                 raise IndexingError(f"Clone path does not exist: {project.clone_path}")
 
             # Update project status
-            project.status = ProjectStatus.INDEXING
+            project.status = ProjectStatus.INDEXING.value
             await self.db.commit()
 
             # 1. Scan project
@@ -542,7 +542,7 @@ class ProjectIndexer:
                 result = await self.db.execute(stmt)
                 project = result.scalar_one_or_none()
                 if project:
-                    project.status = ProjectStatus.ERROR
+                    project.status = ProjectStatus.ERROR.value
                     project.error_message = str(e)
                     await self.db.commit()
             except Exception:
@@ -560,7 +560,7 @@ class ProjectIndexer:
                 result = await self.db.execute(stmt)
                 project = result.scalar_one_or_none()
                 if project:
-                    project.status = ProjectStatus.ERROR
+                    project.status = ProjectStatus.ERROR.value
                     project.error_message = str(e)
                     await self.db.commit()
             except Exception:

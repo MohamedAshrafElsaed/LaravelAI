@@ -86,15 +86,9 @@ class Project(Base):
     # Clone path for local repository
     clone_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Indexing status
-    status: Mapped[ProjectStatus] = mapped_column(
-        SQLEnum(
-            ProjectStatus,
-            values_callable=lambda x: [e.value for e in x],
-            name="projectstatus",
-            create_type=False,  # Don't recreate the type, use existing
-        ),
-        default=ProjectStatus.PENDING
+    # Indexing status (using String for better PostgreSQL compatibility)
+    status: Mapped[str] = mapped_column(
+        String(20), default=ProjectStatus.PENDING.value
     )
     last_indexed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True

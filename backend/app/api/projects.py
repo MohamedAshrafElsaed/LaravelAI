@@ -41,7 +41,7 @@ class ProjectResponse(BaseModel):
     repo_url: str
     default_branch: str
     clone_path: Optional[str]
-    status: ProjectStatus
+    status: str
     indexed_files_count: int
     laravel_version: Optional[str]
     error_message: Optional[str]
@@ -121,7 +121,7 @@ async def clone_project_task(
 
             # Update project with clone path
             project.clone_path = clone_path
-            project.status = ProjectStatus.PENDING  # Ready for indexing
+            project.status = ProjectStatus.PENDING.value  # Ready for indexing
             project.error_message = None
             await db.commit()
 
@@ -131,7 +131,7 @@ async def clone_project_task(
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
             if project:
-                project.status = ProjectStatus.ERROR
+                project.status = ProjectStatus.ERROR.value
                 project.error_message = str(e)
                 await db.commit()
 
@@ -141,7 +141,7 @@ async def clone_project_task(
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
             if project:
-                project.status = ProjectStatus.ERROR
+                project.status = ProjectStatus.ERROR.value
                 project.error_message = f"Unexpected error: {str(e)}"
                 await db.commit()
 
@@ -188,7 +188,7 @@ async def index_project_task(
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
             if project:
-                project.status = ProjectStatus.ERROR
+                project.status = ProjectStatus.ERROR.value
                 project.error_message = f"Indexing failed: {str(e)}"
                 await db.commit()
 
@@ -382,13 +382,13 @@ async def start_indexing(
             detail="Project not found.",
         )
 
-    if project.status == ProjectStatus.INDEXING:
+    if project.status == ProjectStatus.INDEXING.value:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project is already being indexed.",
         )
 
-    if project.status == ProjectStatus.CLONING:
+    if project.status == ProjectStatus.CLONING.value:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project is currently being cloned. Wait for cloning to complete.",
@@ -401,7 +401,7 @@ async def start_indexing(
         )
 
     # Update status to indexing
-    project.status = ProjectStatus.INDEXING
+    project.status = ProjectStatus.INDEXING.value
     project.error_message = None
     await db.commit()
     await db.refresh(project)
@@ -462,7 +462,7 @@ async def get_indexing_status(
         )
 
     # No active progress - return status based on project state
-    if project.status == ProjectStatus.INDEXING:
+    if project.status == ProjectStatus.INDEXING.value:
         return IndexingStatusResponse(
             status="indexing",
             progress=0,
@@ -475,7 +475,7 @@ async def get_indexing_status(
             started_at=None,
             completed_at=None,
         )
-    elif project.status == ProjectStatus.READY:
+    elif project.status == ProjectStatus.READY.value:
         return IndexingStatusResponse(
             status="completed",
             progress=100,
@@ -488,7 +488,7 @@ async def get_indexing_status(
             started_at=None,
             completed_at=project.last_indexed_at.isoformat() if project.last_indexed_at else None,
         )
-    elif project.status == ProjectStatus.ERROR:
+    elif project.status == ProjectStatus.ERROR.value:
         return IndexingStatusResponse(
             status="error",
             progress=0,
@@ -540,14 +540,14 @@ async def start_cloning(
             detail="Project not found.",
         )
 
-    if project.status in [ProjectStatus.CLONING, ProjectStatus.INDEXING]:
+    if project.status in [ProjectStatus.CLONING.value, ProjectStatus.INDEXING.value]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Project is currently being {project.status.value}.",
+            detail=f"Project is currently being {project.status}.",
         )
 
     # Update status to cloning
-    project.status = ProjectStatus.CLONING
+    project.status = ProjectStatus.CLONING.value
     project.error_message = None
     await db.commit()
     await db.refresh(project)
