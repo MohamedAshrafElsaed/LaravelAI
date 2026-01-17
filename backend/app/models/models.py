@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, Integer, String, Text,
-    Enum as SQLEnum, Index, JSON, Float
+    Enum as SQLEnum, Index, JSON, Float, Numeric, Date
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -432,4 +432,148 @@ class ProjectIssue(Base):
     __table_args__ = (
         Index("ix_project_issues_project_category", "project_id", "category"),
         Index("ix_project_issues_severity", "severity"),
+    )
+
+
+class AIUsageStatus(str, Enum):
+    """Status of an AI API call."""
+    SUCCESS = "success"
+    ERROR = "error"
+
+
+class AIUsageRequestType(str, Enum):
+    """Type of AI request."""
+    INTENT = "intent"
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    VALIDATION = "validation"
+    EMBEDDING = "embedding"
+    CHAT = "chat"
+
+
+class AIUsage(Base):
+    """
+    Track AI API usage for cost monitoring and analytics.
+
+    Records every AI API call with token counts, costs, latency,
+    and request/response payloads for debugging and optimization.
+    """
+
+    __tablename__ = "ai_usage"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=generate_uuid
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Provider and model info
+    provider: Mapped[str] = mapped_column(String(50))  # claude, openai, voyage
+    model: Mapped[str] = mapped_column(String(100))    # claude-haiku-4-5-20251001, etc.
+    request_type: Mapped[str] = mapped_column(String(50))  # intent, planning, execution, etc.
+
+    # Token usage
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Cost tracking (Numeric for precise decimal storage)
+    input_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
+    output_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
+    total_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
+
+    # Request/response payloads (for debugging and analysis)
+    request_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    response_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # Performance metrics
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), default=AIUsageStatus.SUCCESS.value
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", backref="ai_usage")
+    project: Mapped[Optional["Project"]] = relationship("Project", backref="ai_usage")
+
+    __table_args__ = (
+        Index("ix_ai_usage_user_id", "user_id"),
+        Index("ix_ai_usage_project_id", "project_id"),
+        Index("ix_ai_usage_provider", "provider"),
+        Index("ix_ai_usage_model", "model"),
+        Index("ix_ai_usage_request_type", "request_type"),
+        Index("ix_ai_usage_created_at", "created_at"),
+        Index("ix_ai_usage_user_created", "user_id", "created_at"),
+    )
+
+
+class AIUsageSummary(Base):
+    """
+    Aggregated daily AI usage statistics for quick lookups.
+
+    Pre-aggregated summary table for efficient dashboard queries.
+    Updated periodically or on-demand from ai_usage table.
+    """
+
+    __tablename__ = "ai_usage_summary"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=generate_uuid
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE")
+    )
+
+    # Aggregation dimensions
+    date: Mapped[datetime] = mapped_column(Date)
+    provider: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+
+    # Aggregated metrics
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    successful_requests: Mapped[int] = mapped_column(Integer, default=0)
+    failed_requests: Mapped[int] = mapped_column(Integer, default=0)
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
+
+    # Performance metrics
+    avg_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    min_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    max_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", backref="ai_usage_summaries")
+
+    __table_args__ = (
+        Index("ix_ai_usage_summary_user_date", "user_id", "date"),
+        Index("ix_ai_usage_summary_user_provider", "user_id", "provider"),
+        Index("ix_ai_usage_summary_date", "date"),
+        # Unique constraint for aggregation key
+        Index(
+            "ix_ai_usage_summary_unique",
+            "user_id", "date", "provider", "model",
+            unique=True
+        ),
     )

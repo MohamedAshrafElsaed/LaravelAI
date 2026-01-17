@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging import setup_logging, RequestLoggingMiddleware
 from app.core.exceptions import register_exception_handlers
-from app.api import auth, health, projects, chat, github, git, git_changes
+from app.api import auth, health, projects, chat, github, git, git_changes, usage
 
 
 # Initialize logging with configuration
@@ -88,6 +88,10 @@ app.include_router(
 # Git changes tracking routes under /projects/{id}/changes
 app.include_router(
     git_changes.router, prefix=f"{settings.api_prefix}/projects", tags=["Git Changes"]
+)
+# AI usage tracking routes
+app.include_router(
+    usage.router, prefix=f"{settings.api_prefix}/usage", tags=["Usage"]
 )
 
 if __name__ == "__main__":
