@@ -20,7 +20,7 @@ from app.agents.planner import Planner, Plan, PlanStep
 from app.agents.executor import Executor, ExecutionResult
 from app.agents.validator import Validator, ValidationResult
 from app.models.models import Project, IndexedFile
-from app.services.claude import get_claude_service
+from app.services.claude import ClaudeService, get_claude_service
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,7 @@ class Orchestrator:
         self,
         db: AsyncSession,
         event_callback: Optional[Callable[[ProcessEvent], Any]] = None,
+        claude_service: Optional[ClaudeService] = None,
     ):
         """
         Initialize the orchestrator.
@@ -104,19 +105,22 @@ class Orchestrator:
         Args:
             db: Database session
             event_callback: Optional callback for real-time events
+            claude_service: Optional ClaudeService instance (with or without tracking).
+                           If not provided, uses the default singleton.
         """
         self.db = db
         self.event_callback = event_callback
 
-        # Initialize agents
-        claude = get_claude_service()
+        # Initialize agents with the Claude service
+        claude = claude_service or get_claude_service()
         self.intent_analyzer = IntentAnalyzer(claude)
         self.context_retriever = ContextRetriever(db)
         self.planner = Planner(claude)
         self.executor = Executor(claude)
         self.validator = Validator(claude)
 
-        logger.info("[ORCHESTRATOR] Initialized with all agents")
+        tracking_info = "with tracking" if (claude_service and claude_service.tracker) else "without tracking"
+        logger.info(f"[ORCHESTRATOR] Initialized with all agents ({tracking_info})")
 
     async def _emit_event(
         self,

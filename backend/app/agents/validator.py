@@ -200,6 +200,7 @@ class Validator:
                 messages=messages,
                 temperature=0.3,
                 max_tokens=4096,
+                request_type="validation",
             )
 
             # Parse JSON response

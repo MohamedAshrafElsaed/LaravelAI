@@ -21,7 +21,8 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.models import Project, User, ProjectStatus, Conversation, Message
 from app.agents.orchestrator import Orchestrator, ProcessEvent, ProcessPhase
-from app.services.claude import get_claude_service, ClaudeModel
+from app.services.claude import get_claude_service, create_tracked_claude_service, ClaudeModel
+from app.services.usage_tracker import UsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,20 @@ async def stream_chat_response(
     })
 
     try:
-        # Create orchestrator with event callback
-        orchestrator = Orchestrator(db=db, event_callback=event_callback)
+        # Create tracked Claude service for this request
+        tracker = UsageTracker(db)
+        claude_service = create_tracked_claude_service(
+            tracker=tracker,
+            user_id=user_id,
+            project_id=project_id,
+        )
+
+        # Create orchestrator with event callback and tracked Claude service
+        orchestrator = Orchestrator(
+            db=db,
+            event_callback=event_callback,
+            claude_service=claude_service,
+        )
 
         # Start processing in background
         process_task = asyncio.create_task(
@@ -406,8 +419,16 @@ async def stream_question_response(
     })
 
     try:
-        # Create orchestrator for context retrieval
-        orchestrator = Orchestrator(db=db)
+        # Create tracked Claude service for this request
+        tracker = UsageTracker(db)
+        claude_service = create_tracked_claude_service(
+            tracker=tracker,
+            user_id=user_id,
+            project_id=project_id,
+        )
+
+        # Create orchestrator for context retrieval with tracked Claude service
+        orchestrator = Orchestrator(db=db, claude_service=claude_service)
 
         # Get intent, context, and project context
         yield create_sse_event(EventType.INTENT_ANALYZED, {
@@ -446,16 +467,16 @@ If you're not sure about something, say so."""
 
 Please answer the question based on this project and codebase context. Use the technology stack, conventions, and patterns specific to this project."""
 
-        # Stream response from Claude
-        claude = get_claude_service()
+        # Stream response from Claude using the tracked service
         messages = [{"role": "user", "content": user_prompt}]
 
         full_response = ""
-        async for chunk in claude.stream(
+        async for chunk in claude_service.stream(
             model=ClaudeModel.SONNET,
             messages=messages,
             system=system_prompt,
             temperature=0.7,
+            request_type="chat",
         ):
             full_response += chunk
             yield create_sse_event(EventType.ANSWER_CHUNK, {
@@ -732,8 +753,16 @@ async def chat_sync(
     await save_message(db, conversation.id, "user", request.message)
 
     try:
-        # Create orchestrator
-        orchestrator = Orchestrator(db=db)
+        # Create tracked Claude service for this request
+        tracker = UsageTracker(db)
+        claude_service = create_tracked_claude_service(
+            tracker=tracker,
+            user_id=str(current_user.id),
+            project_id=project_id,
+        )
+
+        # Create orchestrator with tracked Claude service
+        orchestrator = Orchestrator(db=db, claude_service=claude_service)
 
         # Check if question or action
         is_question = request.message.strip().endswith("?")
@@ -756,11 +785,11 @@ Follow the project's conventions and patterns when suggesting solutions."""
 
 Please answer based on this project's specific technology stack, conventions, and patterns."""
 
-            claude = get_claude_service()
-            response_text = await claude.chat_async(
+            response_text = await claude_service.chat_async(
                 model=ClaudeModel.SONNET,
                 messages=[{"role": "user", "content": user_prompt}],
                 system=system_prompt,
+                request_type="chat",
             )
 
             # Save assistant message

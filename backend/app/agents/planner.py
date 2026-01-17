@@ -174,6 +174,7 @@ class Planner:
                 messages=messages,
                 temperature=0.5,
                 max_tokens=4096,
+                request_type="planning",
             )
 
             # Parse JSON response
@@ -258,6 +259,7 @@ Respond ONLY with the JSON object."""
                 messages=messages,
                 temperature=0.5,
                 max_tokens=4096,
+                request_type="planning",
             )
 
             response_text = response.strip()

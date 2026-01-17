@@ -329,6 +329,7 @@ class Executor:
             messages=messages,
             temperature=0.3,  # Lower temperature for more consistent code
             max_tokens=8192,  # Allow for larger files
+            request_type="execution",
         )
 
     def _parse_response(self, response: str) -> dict:

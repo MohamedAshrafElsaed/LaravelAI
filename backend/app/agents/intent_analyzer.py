@@ -146,6 +146,7 @@ class IntentAnalyzer:
                 messages=messages,
                 temperature=0.3,  # Lower temperature for more consistent output
                 max_tokens=1024,
+                request_type="intent",
             )
 
             # Parse JSON response
