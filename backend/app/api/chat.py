@@ -24,6 +24,11 @@ from app.models.models import Project, User, ProjectStatus, Conversation, Messag
 from app.agents.orchestrator import Orchestrator, ProcessEvent, ProcessPhase
 from app.services.claude import get_claude_service, create_tracked_claude_service, ClaudeModel
 from app.services.usage_tracker import UsageTracker
+from app.services.conversation_logger import (
+    get_conversation_logger,
+    finalize_conversation_logger,
+    ConversationLogger,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,9 +302,26 @@ async def stream_chat_response(
     # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
 
+    # Initialize conversation logger
+    conv_logger = get_conversation_logger(
+        conversation_id=conversation.id,
+        project_id=project_id,
+        user_id=user_id,
+    )
+
     # Fetch conversation history BEFORE saving current message
     history = await get_conversation_history(db, conversation.id, limit=10)
     conversation_context = format_conversation_history(history)
+
+    # Count messages for logging
+    message_count = len(history) + 1
+
+    # Log user message
+    conv_logger.log_user_message(
+        message=message,
+        message_number=message_count,
+        conversation_context=conversation_context if conversation_context else None,
+    )
 
     # Now save the user message
     await save_message(db, conversation.id, "user", message)
@@ -339,11 +361,12 @@ IMPORTANT: Consider the conversation history above when processing this request.
             project_id=project_id,
         )
 
-        # Create orchestrator with event callback and tracked Claude service
+        # Create orchestrator with event callback, tracked Claude service, and conversation logger
         orchestrator = Orchestrator(
             db=db,
             event_callback=event_callback,
             claude_service=claude_service,
+            conversation_logger=conv_logger,
         )
 
         # Start processing in background with conversation context
@@ -460,6 +483,17 @@ Answer the question based on this project's specific technology stack, conventio
 
         await save_message(db, conversation.id, "assistant", response_content, code_changes, processing_data=processing_data)
 
+        # Log the final response
+        conv_logger.log_response(
+            response_content=response_content,
+            response_type="assistant",
+            is_streaming=False,
+        )
+
+        # Finalize the conversation log
+        log_paths = finalize_conversation_logger(conversation.id)
+        logger.info(f"[CHAT] Conversation log finalized: {log_paths}")
+
         # Send final complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": result.success,
@@ -468,10 +502,18 @@ Answer the question based on this project's specific technology stack, conventio
             "execution_results": [r.to_dict() for r in result.execution_results],
             "validation": result.validation.to_dict() if result.validation else None,
             "error": result.error,
+            "log_paths": log_paths,  # Include log file paths in response
         })
 
     except Exception as e:
         logger.exception(f"[CHAT] Stream error: {e}")
+        # Log error
+        conv_logger.log_error(
+            error_message=str(e),
+            error_type="stream_error",
+        )
+        # Finalize the conversation log even on error
+        finalize_conversation_logger(conversation.id)
         # Save error as assistant message
         await save_message(db, conversation.id, "assistant", f"Error: {str(e)}")
         yield create_sse_event(EventType.ERROR, {
@@ -555,9 +597,26 @@ async def stream_question_response(
     # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
 
+    # Initialize conversation logger
+    conv_logger = get_conversation_logger(
+        conversation_id=conversation.id,
+        project_id=project_id,
+        user_id=user_id,
+    )
+
     # Fetch conversation history BEFORE saving current message
     history = await get_conversation_history(db, conversation.id, limit=10)
     conversation_context = format_conversation_history(history)
+
+    # Count messages for logging
+    message_count = len(history) + 1
+
+    # Log user question
+    conv_logger.log_user_message(
+        message=question,
+        message_number=message_count,
+        conversation_context=conversation_context if conversation_context else None,
+    )
 
     # Now save the user message
     await save_message(db, conversation.id, "user", question)
@@ -576,8 +635,8 @@ async def stream_question_response(
             project_id=project_id,
         )
 
-        # Create orchestrator for context retrieval with tracked Claude service
-        orchestrator = Orchestrator(db=db, claude_service=claude_service)
+        # Create orchestrator for context retrieval with tracked Claude service and logger
+        orchestrator = Orchestrator(db=db, claude_service=claude_service, conversation_logger=conv_logger)
 
         # Get intent, context, and project context (include conversation history in question)
         question_with_context = question
@@ -638,14 +697,33 @@ Answer the question based on this project's specific technology stack, conventio
         # Save assistant message
         await save_message(db, conversation.id, "assistant", full_response)
 
+        # Log the final response
+        conv_logger.log_response(
+            response_content=full_response,
+            response_type="assistant",
+            is_streaming=False,
+        )
+
+        # Finalize the conversation log
+        log_paths = finalize_conversation_logger(conversation.id)
+        logger.info(f"[CHAT] Question conversation log finalized: {log_paths}")
+
         # Send complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": True,
             "answer": full_response,
+            "log_paths": log_paths,  # Include log file paths in response
         })
 
     except Exception as e:
         logger.exception(f"[CHAT] Question stream error: {e}")
+        # Log error
+        conv_logger.log_error(
+            error_message=str(e),
+            error_type="question_stream_error",
+        )
+        # Finalize the conversation log even on error
+        finalize_conversation_logger(conversation.id)
         await save_message(db, conversation.id, "assistant", f"Error: {str(e)}")
         yield create_sse_event(EventType.ERROR, {
             "message": str(e),
@@ -802,6 +880,167 @@ async def delete_conversation(
     return {"message": "Conversation deleted"}
 
 
+@router.get("/{project_id}/conversations/{conversation_id}/logs")
+async def get_conversation_logs(
+    project_id: str,
+    conversation_id: str,
+    log_type: str = Query("main", description="Type of log: main, json, agents, files"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get conversation logs for analysis.
+
+    Returns the contents of conversation log files.
+
+    Log types:
+    - main: Full conversation log in human-readable format
+    - json: Structured JSON log with all entries
+    - agents: Detailed agent outputs
+    - files: File change tracking
+
+    Returns:
+        The log content or paths to log files
+    """
+    import os
+    from pathlib import Path
+
+    logger.info(f"[CHAT] GET /projects/{project_id}/conversations/{conversation_id}/logs - user_id={current_user.id}")
+
+    # Verify conversation belongs to user and project
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.project_id == project_id,
+        Conversation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    # Build log directory path
+    log_dir = Path("/tmp/conversation_logs") / project_id / conversation_id
+
+    # Map log types to file names
+    log_files = {
+        "main": "conversation.txt",
+        "json": "conversation.json",
+        "agents": "agents.txt",
+        "files": "file_changes.txt",
+    }
+
+    if log_type not in log_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid log type. Must be one of: {', '.join(log_files.keys())}",
+        )
+
+    log_file = log_dir / log_files[log_type]
+
+    if not log_file.exists():
+        # Return empty response with info about available logs
+        available_logs = [
+            log_type for log_type, filename in log_files.items()
+            if (log_dir / filename).exists()
+        ]
+        return {
+            "exists": False,
+            "message": f"Log file not found. Conversation may not have been logged yet.",
+            "available_logs": available_logs,
+            "log_dir": str(log_dir),
+        }
+
+    try:
+        content = log_file.read_text(encoding="utf-8")
+
+        # For JSON logs, parse and return as dict
+        if log_type == "json":
+            import json
+            return {
+                "exists": True,
+                "log_type": log_type,
+                "data": json.loads(content),
+            }
+        else:
+            return {
+                "exists": True,
+                "log_type": log_type,
+                "content": content,
+                "size_bytes": len(content.encode("utf-8")),
+            }
+    except Exception as e:
+        logger.error(f"[CHAT] Error reading log file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error reading log file: {str(e)}",
+        )
+
+
+@router.get("/{project_id}/conversations/{conversation_id}/logs/download")
+async def download_conversation_logs(
+    project_id: str,
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download all conversation logs as a zip file.
+
+    Returns a zip archive containing all log files for the conversation.
+    """
+    import io
+    import zipfile
+    from pathlib import Path
+    from fastapi.responses import Response
+
+    logger.info(f"[CHAT] GET /projects/{project_id}/conversations/{conversation_id}/logs/download - user_id={current_user.id}")
+
+    # Verify conversation belongs to user and project
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.project_id == project_id,
+        Conversation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    # Build log directory path
+    log_dir = Path("/tmp/conversation_logs") / project_id / conversation_id
+
+    if not log_dir.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No logs found for this conversation",
+        )
+
+    # Create zip file in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for log_file in log_dir.glob("*"):
+            if log_file.is_file():
+                zip_file.write(log_file, log_file.name)
+
+    zip_buffer.seek(0)
+
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=conversation_logs_{conversation_id[:8]}.zip"
+        },
+    )
+
+
 @router.post("/{project_id}/chat")
 async def chat_with_project(
     project_id: str,
@@ -901,6 +1140,24 @@ async def chat_sync(
         db, current_user.id, project_id, request.conversation_id
     )
 
+    # Initialize conversation logger
+    conv_logger = get_conversation_logger(
+        conversation_id=conversation.id,
+        project_id=project_id,
+        user_id=str(current_user.id),
+    )
+
+    # Fetch conversation history for context logging
+    history = await get_conversation_history(db, conversation.id, limit=10)
+    conversation_context = format_conversation_history(history)
+
+    # Log user message
+    conv_logger.log_user_message(
+        message=request.message,
+        message_number=len(history) + 1,
+        conversation_context=conversation_context if conversation_context else None,
+    )
+
     # Save user message
     await save_message(db, conversation.id, "user", request.message)
 
@@ -913,8 +1170,8 @@ async def chat_sync(
             project_id=project_id,
         )
 
-        # Create orchestrator with tracked Claude service
-        orchestrator = Orchestrator(db=db, claude_service=claude_service)
+        # Create orchestrator with tracked Claude service and logger
+        orchestrator = Orchestrator(db=db, claude_service=claude_service, conversation_logger=conv_logger)
 
         # Check if question or action
         is_question = request.message.strip().endswith("?")
@@ -946,6 +1203,14 @@ Answer based on this project's specific technology stack, conventions, and patte
 
             # Save assistant message
             saved_message = await save_message(db, conversation.id, "assistant", response_text)
+
+            # Log the response and finalize
+            conv_logger.log_response(
+                response_content=response_text,
+                response_type="assistant",
+                is_streaming=False,
+            )
+            finalize_conversation_logger(conversation.id)
 
             return ChatResponse(
                 conversation_id=conversation.id,
@@ -1020,6 +1285,14 @@ Answer based on this project's specific technology stack, conventions, and patte
                 db, conversation.id, "assistant", response_content, code_changes
             )
 
+            # Log the response and finalize
+            conv_logger.log_response(
+                response_content=response_content,
+                response_type="assistant",
+                is_streaming=False,
+            )
+            finalize_conversation_logger(conversation.id)
+
             return ChatResponse(
                 conversation_id=conversation.id,
                 message=ChatMessageResponse(
@@ -1034,6 +1307,12 @@ Answer based on this project's specific technology stack, conventions, and patte
 
     except Exception as e:
         logger.exception(f"[CHAT] Sync chat error: {e}")
+        # Log error and finalize
+        conv_logger.log_error(
+            error_message=str(e),
+            error_type="sync_chat_error",
+        )
+        finalize_conversation_logger(conversation.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),

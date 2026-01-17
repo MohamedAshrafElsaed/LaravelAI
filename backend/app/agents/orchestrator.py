@@ -21,6 +21,7 @@ from app.agents.executor import Executor, ExecutionResult
 from app.agents.validator import Validator, ValidationResult
 from app.models.models import Project, IndexedFile
 from app.services.claude import ClaudeService, get_claude_service
+from app.services.conversation_logger import ConversationLogger
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class Orchestrator:
         db: AsyncSession,
         event_callback: Optional[Callable[[ProcessEvent], Any]] = None,
         claude_service: Optional[ClaudeService] = None,
+        conversation_logger: Optional[ConversationLogger] = None,
     ):
         """
         Initialize the orchestrator.
@@ -107,9 +109,11 @@ class Orchestrator:
             event_callback: Optional callback for real-time events
             claude_service: Optional ClaudeService instance (with or without tracking).
                            If not provided, uses the default singleton.
+            conversation_logger: Optional ConversationLogger for detailed conversation logging
         """
         self.db = db
         self.event_callback = event_callback
+        self.conversation_logger = conversation_logger
 
         # Initialize agents with the Claude service
         claude = claude_service or get_claude_service()
@@ -120,7 +124,8 @@ class Orchestrator:
         self.validator = Validator(claude)
 
         tracking_info = "with tracking" if (claude_service and claude_service.tracker) else "without tracking"
-        logger.info(f"[ORCHESTRATOR] Initialized with all agents ({tracking_info})")
+        logging_info = "with conversation logging" if conversation_logger else "without conversation logging"
+        logger.info(f"[ORCHESTRATOR] Initialized with all agents ({tracking_info}, {logging_info})")
 
     async def _emit_event(
         self,
@@ -192,6 +197,10 @@ class Orchestrator:
             intent = await self.intent_analyzer.analyze(user_input, project_context)
             result.intent = intent
 
+            # Log intent analysis
+            if self.conversation_logger:
+                self.conversation_logger.log_intent_analysis(intent.to_dict())
+
             event = await self._emit_event(
                 ProcessPhase.ANALYZING,
                 f"Identified task type: {intent.task_type}",
@@ -209,6 +218,23 @@ class Orchestrator:
             result.events.append(event)
 
             context = await self.context_retriever.retrieve(project_id, intent)
+
+            # Log context retrieval
+            if self.conversation_logger:
+                chunks_data = [
+                    {
+                        "file_path": chunk.file_path,
+                        "content": chunk.content[:500] if chunk.content else "",
+                        "score": getattr(chunk, 'score', None),
+                    }
+                    for chunk in context.chunks[:20]  # Limit to 20 chunks
+                ]
+                self.conversation_logger.log_context_retrieval(
+                    chunks_count=len(context.chunks),
+                    chunks=chunks_data,
+                    related_files=context.related_files if hasattr(context, 'related_files') else None,
+                    domain_summaries=context.domain_summaries if hasattr(context, 'domain_summaries') else None,
+                )
 
             event = await self._emit_event(
                 ProcessPhase.RETRIEVING,
@@ -241,6 +267,10 @@ class Orchestrator:
 
             plan = await self.planner.plan(user_input, intent, context, project_context)
             result.plan = plan
+
+            # Log plan creation
+            if self.conversation_logger:
+                self.conversation_logger.log_plan(plan.to_dict())
 
             event = await self._emit_event(
                 ProcessPhase.PLANNING,
@@ -297,6 +327,17 @@ class Orchestrator:
 
                 execution_results.append(exec_result)
 
+                # Log execution step
+                if self.conversation_logger:
+                    self.conversation_logger.log_execution_step(
+                        step_number=i + 1,
+                        total_steps=total_steps,
+                        step_data=step.to_dict(),
+                        result_data=exec_result.to_dict(),
+                        generated_code=exec_result.content,
+                        diff=exec_result.diff,
+                    )
+
                 # Emit step_completed event with result data
                 event = await self._emit_event(
                     ProcessPhase.EXECUTING,
@@ -339,6 +380,10 @@ class Orchestrator:
                 context=context,
             )
             result.validation = validation
+
+            # Log validation
+            if self.conversation_logger:
+                self.conversation_logger.log_validation(validation.to_dict())
 
             # 8. Retry if validation failed
             retry_count = 0
@@ -431,6 +476,16 @@ class Orchestrator:
 
                 result.execution_results = execution_results
 
+                # Log fix attempt
+                if self.conversation_logger:
+                    fixed_files = [execution_results[idx].file for idx in files_to_fix if execution_results[idx].success]
+                    self.conversation_logger.log_fix_attempt(
+                        attempt_number=retry_count,
+                        max_attempts=MAX_RETRY_ATTEMPTS,
+                        issues=all_issues,
+                        fixed_files=fixed_files,
+                    )
+
                 # Re-validate
                 validation = await self.validator.validate(
                     user_input=user_input,
@@ -439,6 +494,10 @@ class Orchestrator:
                     context=context,
                 )
                 result.validation = validation
+
+                # Log re-validation
+                if self.conversation_logger:
+                    self.conversation_logger.log_validation(validation.to_dict())
 
                 logger.info(f"[ORCHESTRATOR] Retry {retry_count}: approved={validation.approved}, score={validation.score}")
 
