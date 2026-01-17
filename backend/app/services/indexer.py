@@ -242,7 +242,7 @@ class ProjectIndexer:
         files: List[FileInfo],
         project_path: str,
         progress: IndexingProgress,
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
         """
         Parse and chunk all files.
 
@@ -252,9 +252,10 @@ class ProjectIndexer:
             progress: Progress tracker
 
         Returns:
-            List of all chunks
+            Tuple of (all_chunks, file_contents dict)
         """
         all_chunks = []
+        file_contents: Dict[str, str] = {}
 
         # Filter to only indexable files
         indexable_types = {"php", "blade", "javascript", "typescript", "vue"}
@@ -271,6 +272,10 @@ class ProjectIndexer:
 
             # Read file content
             source_code = self._read_file_content(file_info.path, project_path)
+
+            # Store file content for database (even if empty, to track the file)
+            file_contents[file_info.path] = source_code
+
             if not source_code.strip():
                 continue
 
@@ -309,7 +314,7 @@ class ProjectIndexer:
             total_chunks=len(all_chunks),
         )
 
-        return all_chunks
+        return all_chunks, file_contents
 
     async def _generate_embeddings(
         self,
@@ -396,6 +401,7 @@ class ProjectIndexer:
         project: Project,
         files: List[FileInfo],
         chunks: List[Dict[str, Any]],
+        file_contents: Dict[str, str],
     ) -> None:
         """
         Update database with indexing results.
@@ -404,6 +410,7 @@ class ProjectIndexer:
             project: The Project model instance
             files: List of indexed files
             chunks: List of chunks
+            file_contents: Dictionary mapping file paths to their content
         """
         try:
             # Clear existing indexed files
@@ -418,11 +425,15 @@ class ProjectIndexer:
                 # Find chunks for this file
                 file_chunks = [c for c in chunks if c.get("file_path") == file_info.path]
 
+                # Get file content (IMPORTANT: needed for context retrieval)
+                content = file_contents.get(file_info.path, "")
+
                 indexed_file = IndexedFile(
                     project_id=str(project.id),
                     file_path=file_info.path,
                     file_type=file_info.laravel_type,
                     file_hash=file_info.hash,
+                    content=content,  # Store the actual file content!
                     file_metadata={
                         "type": file_info.type,
                         "size": file_info.size,
@@ -500,7 +511,7 @@ class ProjectIndexer:
 
             # 2. Parse and chunk files
             logger.info(f"Processing {len(files)} files")
-            chunks = await self._process_files(files, project.clone_path, progress)
+            chunks, file_contents = await self._process_files(files, project.clone_path, progress)
 
             if not chunks:
                 raise IndexingError("No chunks generated from files")
@@ -515,9 +526,9 @@ class ProjectIndexer:
                 project_id, chunks, embeddings, progress
             )
 
-            # 5. Update database
+            # 5. Update database (with file contents for context retrieval)
             logger.info("Updating database records")
-            await self._update_database(project, files, chunks)
+            await self._update_database(project, files, chunks, file_contents)
 
             # Mark as completed
             progress.phase = IndexingPhase.COMPLETED
