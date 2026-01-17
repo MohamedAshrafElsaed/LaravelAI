@@ -65,8 +65,20 @@ class ClaudeService:
         if not self.api_key:
             raise ValueError("Anthropic API key is required")
 
-        self.client = Anthropic(api_key=self.api_key)
-        self.async_client = AsyncAnthropic(api_key=self.api_key)
+        # Initialize clients with prompt caching beta header
+        # This enables prompt caching for supported models
+        default_headers = {
+            "anthropic-beta": "prompt-caching-2024-07-31"
+        }
+
+        self.client = Anthropic(
+            api_key=self.api_key,
+            default_headers=default_headers,
+        )
+        self.async_client = AsyncAnthropic(
+            api_key=self.api_key,
+            default_headers=default_headers,
+        )
 
         # Tracking configuration
         self.tracker = tracker
@@ -322,6 +334,8 @@ class ClaudeService:
             output_tokens = response.usage.output_tokens
 
             # Get cache stats from response
+            # Debug: log full usage object to see what's available
+            logger.debug(f"[CLAUDE] Full usage object: {response.usage}")
             cache_creation_input_tokens = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
             cache_read_input_tokens = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
 
