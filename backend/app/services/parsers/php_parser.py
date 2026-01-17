@@ -9,7 +9,7 @@ from tree_sitter import Language, Parser
 
 
 # Initialize tree-sitter PHP language
-PHP_LANGUAGE = Language(tsphp.language())
+PHP_LANGUAGE = Language(tsphp.language_php())
 
 
 @dataclass
