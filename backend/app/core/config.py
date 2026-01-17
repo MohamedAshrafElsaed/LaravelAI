@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     qdrant_api_key: str = ""
     qdrant_collection: str = "laravel_code"
 
+    # OpenAI (for embeddings)
+    openai_api_key: str = ""
+    openai_embedding_model: str = "text-embedding-3-small"
+
+    # Voyage AI (alternative embeddings provider)
+    voyage_api_key: str = ""
+    voyage_embedding_model: str = "voyage-code-3"
+
+    # Embedding provider selection: "openai" or "voyage"
+    embedding_provider: str = "openai"
+
     # Frontend
     frontend_url: str = "http://localhost:3000"
 
