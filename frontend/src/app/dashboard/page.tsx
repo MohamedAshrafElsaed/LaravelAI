@@ -7,13 +7,13 @@ import { projectsApi, githubApi } from '@/lib/api';
 
 interface Project {
   id: string;
-  name: string;
+  name?: string;
   repo_full_name: string;
   repo_url: string;
   status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
   indexed_files_count: number;
   laravel_version: string | null;
-  error_message: string | null;
+  error_message?: string | null;
 }
 
 interface GitHubRepo {
@@ -67,6 +67,44 @@ export default function Dashboard() {
       fetchProjects();
     }
   }, [mounted, isAuthenticated, router, setProjects]);
+
+  // Polling for in-progress projects (cloning or indexing)
+  const { updateProject } = useProjectsStore();
+
+  useEffect(() => {
+    // Check if there are any projects in progress
+    const inProgressProjects = projects.filter(
+      (p) => p.status === 'cloning' || p.status === 'indexing'
+    );
+
+    if (inProgressProjects.length === 0 || !mounted || !isAuthenticated) {
+      return;
+    }
+
+    // Poll every 2 seconds for status updates
+    const pollInterval = setInterval(async () => {
+      for (const project of inProgressProjects) {
+        try {
+          const response = await projectsApi.get(project.id);
+          const updatedProject = response.data;
+
+          // Only update if status changed
+          if (updatedProject.status !== project.status) {
+            updateProject(project.id, {
+              status: updatedProject.status,
+              indexed_files_count: updatedProject.indexed_files_count,
+              laravel_version: updatedProject.laravel_version,
+              error_message: updatedProject.error_message,
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to poll project ${project.id}:`, error);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [projects, mounted, isAuthenticated, updateProject]);
 
   const fetchGitHubRepos = useCallback(async () => {
     setReposLoading(true);
@@ -139,8 +177,12 @@ export default function Dashboard() {
       ready: 'bg-green-500/10 text-green-500',
       error: 'bg-red-500/10 text-red-500',
     };
+    const isInProgress = status === 'cloning' || status === 'indexing';
     return (
-      <span className={`rounded-full px-2 py-1 text-xs font-medium ${styles[status]}`}>
+      <span className={`rounded-full px-2 py-1 text-xs font-medium ${styles[status]} flex items-center gap-1`}>
+        {isInProgress && (
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        )}
         {status}
       </span>
     );

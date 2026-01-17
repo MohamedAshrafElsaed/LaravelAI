@@ -12,11 +12,13 @@ interface User {
 // Project type
 interface Project {
   id: string;
+  name?: string;
   repo_full_name: string;
   repo_url: string;
-  status: 'pending' | 'indexing' | 'ready' | 'error';
+  status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error';
   indexed_files_count: number;
   laravel_version: string | null;
+  error_message?: string | null;
 }
 
 // Auth store
