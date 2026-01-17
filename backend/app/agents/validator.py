@@ -3,15 +3,18 @@ Validator Agent.
 
 Validates execution results against coding standards, conventions,
 and the original intent to ensure quality and completeness.
+
+UPDATED: Includes contradiction detection.
 """
 import json
 import logging
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass, field, asdict
 
 from app.agents.intent_analyzer import Intent
 from app.agents.context_retriever import RetrievedContext
 from app.agents.executor import ExecutionResult
+from app.agents.config import AgentConfig, agent_config
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
@@ -376,27 +379,36 @@ class Validator:
     Validates execution results for quality and correctness.
 
     Uses Claude Sonnet for thorough code review.
+
+    UPDATED: Includes contradiction detection.
     """
 
-    def __init__(self, claude_service: Optional[ClaudeService] = None):
+    def __init__(
+        self,
+        claude_service: Optional[ClaudeService] = None,
+        config: Optional[AgentConfig] = None,
+    ):
         """
         Initialize the validator.
 
         Args:
             claude_service: Optional Claude service instance.
+            config: Optional agent configuration.
         """
         self.claude = claude_service or get_claude_service()
-        logger.info("[VALIDATOR] Initialized")
+        self.config = config or agent_config
+        self.validation_history: List[ValidationResult] = []  # Track history
+        logger.info("[VALIDATOR] Initialized with contradiction detection")
 
     async def validate(
         self,
         user_input: str,
         intent: Intent,
-        results: list[ExecutionResult],
+        results: List[ExecutionResult],
         context: RetrievedContext,
     ) -> ValidationResult:
         """
-        Validate execution results.
+        Validate execution results with contradiction detection.
 
         Args:
             user_input: Original user request
@@ -445,6 +457,20 @@ class Validator:
             validation_data = json.loads(response_text)
             result = ValidationResult.from_dict(validation_data)
 
+            # Check for contradictions with previous validations
+            if self.config.ENABLE_CONTRADICTION_DETECTION and self.validation_history:
+                contradictions = self._detect_contradictions(result)
+                if contradictions:
+                    logger.warning(f"[VALIDATOR] Detected {len(contradictions)} contradictions")
+                    # Add warning to suggestions
+                    result.suggestions = result.suggestions or []
+                    result.suggestions.append(
+                        f"Validation may be inconsistent: {len(contradictions)} potential contradictions detected"
+                    )
+
+            # Store in history
+            self.validation_history.append(result)
+
             logger.info(f"[VALIDATOR] Validation complete: approved={result.approved}, score={result.score}")
             logger.info(f"[VALIDATOR] Issues: {len(result.errors)} errors, {len(result.warnings)} warnings")
 
@@ -467,6 +493,49 @@ class Validator:
         except Exception as e:
             logger.error(f"[VALIDATOR] Validation failed: {e}")
             raise
+
+    def _detect_contradictions(self, current: ValidationResult) -> List[dict]:
+        """Detect contradictory feedback across validation iterations."""
+        contradictions = []
+
+        # Patterns that are often contradictory
+        contradiction_patterns = [
+            ("redundant", "missing"),
+            ("remove", "add"),
+            ("unnecessary", "required"),
+            ("should not", "should"),
+        ]
+
+        if not self.validation_history:
+            return contradictions
+
+        previous = self.validation_history[-1]
+
+        for curr_issue in current.issues:
+            curr_msg = curr_issue.message.lower()
+            for prev_issue in previous.issues:
+                prev_msg = prev_issue.message.lower()
+
+                # Check if same file
+                if curr_issue.file != prev_issue.file:
+                    continue
+
+                # Check for contradictory language
+                for pattern_a, pattern_b in contradiction_patterns:
+                    if (pattern_a in curr_msg and pattern_b in prev_msg) or \
+                       (pattern_b in curr_msg and pattern_a in prev_msg):
+                        contradictions.append({
+                            "file": curr_issue.file,
+                            "previous": prev_issue.message,
+                            "current": curr_issue.message,
+                            "pattern": f"{pattern_a} vs {pattern_b}"
+                        })
+
+        return contradictions
+
+    def clear_history(self):
+        """Clear validation history (call at start of new request)."""
+        self.validation_history = []
 
     def _format_changes(self, results: list[ExecutionResult]) -> str:
         """Format execution results for validation prompt."""

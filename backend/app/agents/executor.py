@@ -3,16 +3,20 @@ Executor Agent.
 
 Executes individual plan steps by generating code changes.
 Uses Claude Sonnet for high-quality code generation.
+
+UPDATED: Includes file existence checks and better error handling.
 """
 import difflib
 import json
 import logging
 import re
-from typing import Optional
+from typing import Optional, List, Tuple
 from dataclasses import dataclass, field, asdict
 
 from app.agents.planner import PlanStep
 from app.agents.context_retriever import RetrievedContext
+from app.agents.config import AgentConfig, agent_config
+from app.agents.exceptions import FileNotFoundForModifyError
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
@@ -423,6 +427,11 @@ class ExecutionResult:
     original_content: str = ""
     success: bool = True
     error: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)  # Track warnings
+
+    def __post_init__(self):
+        if self.warnings is None:
+            self.warnings = []
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -457,29 +466,37 @@ class Executor:
     Executes plan steps by generating code.
 
     Uses Claude Sonnet for high-quality code generation.
+
+    UPDATED: Includes file existence validation and better context handling.
     """
 
-    def __init__(self, claude_service: Optional[ClaudeService] = None):
+    def __init__(
+        self,
+        claude_service: Optional[ClaudeService] = None,
+        config: Optional[AgentConfig] = None,
+    ):
         """
         Initialize the executor.
 
         Args:
             claude_service: Optional Claude service instance.
+            config: Optional agent configuration.
         """
         self.claude = claude_service or get_claude_service()
-        logger.info("[EXECUTOR] Initialized")
+        self.config = config or agent_config
+        logger.info("[EXECUTOR] Initialized with safety checks")
 
     async def execute_step(
         self,
         step: PlanStep,
         context: RetrievedContext,
-        previous_results: list[ExecutionResult],
+        previous_results: List[ExecutionResult],
         current_file_content: Optional[str] = None,
         project_context: str = "",
         enable_self_verification: bool = True,
     ) -> ExecutionResult:
         """
-        Execute a single plan step.
+        Execute a single plan step with safety checks.
 
         Args:
             step: The plan step to execute
@@ -493,6 +510,35 @@ class Executor:
             ExecutionResult with generated code
         """
         logger.info(f"[EXECUTOR] Executing step {step.order}: [{step.action}] {step.file}")
+
+        # Validate file exists for modify actions
+        if step.action == "modify":
+            if self.config.REQUIRE_FILE_EXISTS_FOR_MODIFY:
+                if not current_file_content:
+                    logger.error(f"[EXECUTOR] Cannot modify non-existent file: {step.file}")
+
+                    # Check if this should be a create instead
+                    return ExecutionResult(
+                        file=step.file,
+                        action=step.action,
+                        content="",
+                        success=False,
+                        error=f"File '{step.file}' not found in codebase. "
+                              f"Did you mean to use 'create' action? "
+                              f"If modifying an existing file, ensure it's indexed.",
+                        warnings=[
+                            "File not found for modify action",
+                            "Consider using 'create' action for new files"
+                        ]
+                    )
+
+        # Add context quality warning to results
+        warnings = []
+        if context.confidence_level in ("low", "insufficient"):
+            warnings.append(
+                f"Low context confidence ({context.confidence_level}). "
+                "Generated code may need manual review."
+            )
 
         # Format previous results for context
         prev_results_str = self._format_previous_results(previous_results)
@@ -519,6 +565,9 @@ class Executor:
                     success=False,
                     error=f"Unknown action: {step.action}",
                 )
+
+            # Add context warnings to result
+            result.warnings.extend(warnings)
 
             # Run self-verification if enabled and code was generated
             if enable_self_verification and result.content:
@@ -549,6 +598,7 @@ class Executor:
                 content="",
                 success=False,
                 error=str(e),
+                warnings=warnings,
             )
 
     async def _execute_create(
@@ -592,7 +642,7 @@ class Executor:
         current_content: str,
         project_context: str = "",
     ) -> ExecutionResult:
-        """Execute a modify action."""
+        """Execute a modify action with original content preservation."""
         user_prompt = safe_format(
             EXECUTION_USER_MODIFY,
             description=step.description,
@@ -611,12 +661,21 @@ class Executor:
         # Generate unified diff
         diff = self._generate_diff(current_content, content, step.file)
 
+        # Validate that original content is preserved
+        warnings = []
+        if current_content and content:
+            preservation_check = self._check_content_preservation(current_content, content)
+            if not preservation_check["preserved"]:
+                logger.warning(f"[EXECUTOR] Content may have been lost: {preservation_check['issues']}")
+                warnings.extend(preservation_check["issues"])
+
         return ExecutionResult(
             file=step.file,
             action="modify",
             content=content,
             diff=diff,
             original_content=current_content,
+            warnings=warnings,
         )
 
     async def _execute_delete(
@@ -703,7 +762,7 @@ class Executor:
 
     def _format_previous_results(
         self,
-        results: list[ExecutionResult],
+        results: List[ExecutionResult],
     ) -> str:
         """Format previous results for context."""
         if not results:
@@ -717,6 +776,43 @@ class Executor:
                 parts.append(f"  Error: {result.error}")
 
         return "\n".join(parts)
+
+    def _check_content_preservation(
+        self,
+        original: str,
+        modified: str,
+    ) -> dict:
+        """Check if original content was preserved in modification."""
+        issues = []
+
+        # Check for significant content loss
+        original_lines = set(original.strip().split('\n'))
+        modified_lines = set(modified.strip().split('\n'))
+
+        # Find lines that were removed (excluding empty lines)
+        removed_lines = original_lines - modified_lines
+        significant_removals = [l for l in removed_lines if l.strip() and not l.strip().startswith('//')]
+
+        if len(significant_removals) > len(original_lines) * 0.3:  # More than 30% removed
+            issues.append(f"Significant content removal detected: {len(significant_removals)} lines")
+
+        # Check for key Laravel patterns that should be preserved
+        patterns_to_preserve = [
+            (r'Route::', 'Route definitions'),
+            (r'use\s+[\w\\]+;', 'Use statements'),
+            (r'function\s+\w+\s*\(', 'Function definitions'),
+        ]
+
+        for pattern, description in patterns_to_preserve:
+            original_matches = len(re.findall(pattern, original))
+            modified_matches = len(re.findall(pattern, modified))
+            if modified_matches < original_matches:
+                issues.append(f"{description} may have been removed")
+
+        return {
+            "preserved": len(issues) == 0,
+            "issues": issues,
+        }
 
     async def fix_execution(
         self,

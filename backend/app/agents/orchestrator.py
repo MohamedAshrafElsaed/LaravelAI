@@ -3,10 +3,12 @@ Orchestrator Agent.
 
 Coordinates all agents to process user requests from start to finish.
 Manages the workflow: analyze → retrieve → plan → execute → validate.
+
+UPDATED: Includes safety checks and circuit breakers.
 """
 import json
 import logging
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
@@ -19,13 +21,13 @@ from app.agents.context_retriever import ContextRetriever, RetrievedContext
 from app.agents.planner import Planner, Plan, PlanStep
 from app.agents.executor import Executor, ExecutionResult
 from app.agents.validator import Validator, ValidationResult
+from app.agents.config import AgentConfig, agent_config
+from app.agents.exceptions import InsufficientContextError
 from app.models.models import Project, IndexedFile
 from app.services.claude import ClaudeService, get_claude_service
 from app.services.conversation_logger import ConversationLogger
 
 logger = logging.getLogger(__name__)
-
-MAX_RETRY_ATTEMPTS = 3
 
 
 class ProcessPhase(str, Enum):
@@ -92,6 +94,8 @@ class Orchestrator:
     Orchestrates the full request processing workflow.
 
     Coordinates all agents and manages retries on validation failures.
+
+    UPDATED: Includes safety checks and circuit breakers.
     """
 
     def __init__(
@@ -100,6 +104,7 @@ class Orchestrator:
         event_callback: Optional[Callable[[ProcessEvent], Any]] = None,
         claude_service: Optional[ClaudeService] = None,
         conversation_logger: Optional[ConversationLogger] = None,
+        config: Optional[AgentConfig] = None,
     ):
         """
         Initialize the orchestrator.
@@ -110,22 +115,24 @@ class Orchestrator:
             claude_service: Optional ClaudeService instance (with or without tracking).
                            If not provided, uses the default singleton.
             conversation_logger: Optional ConversationLogger for detailed conversation logging
+            config: Optional agent configuration
         """
         self.db = db
         self.event_callback = event_callback
         self.conversation_logger = conversation_logger
+        self.config = config or agent_config
 
-        # Initialize agents with the Claude service
+        # Initialize agents with the Claude service and config
         claude = claude_service or get_claude_service()
         self.intent_analyzer = IntentAnalyzer(claude)
-        self.context_retriever = ContextRetriever(db)
+        self.context_retriever = ContextRetriever(db, config=self.config)
         self.planner = Planner(claude)
-        self.executor = Executor(claude)
-        self.validator = Validator(claude)
+        self.executor = Executor(claude, config=self.config)
+        self.validator = Validator(claude, config=self.config)
 
         tracking_info = "with tracking" if (claude_service and claude_service.tracker) else "without tracking"
         logging_info = "with conversation logging" if conversation_logger else "without conversation logging"
-        logger.info(f"[ORCHESTRATOR] Initialized with all agents ({tracking_info}, {logging_info})")
+        logger.info(f"[ORCHESTRATOR] Initialized with all agents and safety features ({tracking_info}, {logging_info})")
 
     async def _emit_event(
         self,
@@ -161,7 +168,7 @@ class Orchestrator:
         user_input: str,
     ) -> ProcessResult:
         """
-        Process a user request through the full pipeline.
+        Process a user request through the full pipeline with safety checks.
 
         Args:
             project_id: The project UUID
@@ -174,6 +181,9 @@ class Orchestrator:
         logger.info(f"[ORCHESTRATOR] User input: {user_input[:200]}...")
 
         result = ProcessResult(success=False, events=[])
+
+        # Clear validator history for new request
+        self.validator.clear_history()
 
         try:
             # 1. Fetch project and build rich context
@@ -209,7 +219,7 @@ class Orchestrator:
             )
             result.events.append(event)
 
-            # 3. Retrieve context
+            # 3. Retrieve context (with safety check)
             event = await self._emit_event(
                 ProcessPhase.RETRIEVING,
                 "Searching codebase for relevant context...",
@@ -217,7 +227,33 @@ class Orchestrator:
             )
             result.events.append(event)
 
-            context = await self.context_retriever.retrieve(project_id, intent)
+            try:
+                context = await self.context_retriever.retrieve(
+                    project_id, intent,
+                    require_minimum=self.config.ABORT_ON_NO_CONTEXT
+                )
+            except InsufficientContextError as e:
+                # Handle insufficient context gracefully
+                await self._emit_event(
+                    ProcessPhase.FAILED,
+                    f"Insufficient codebase context: {e.message}",
+                    0.25
+                )
+                result.error = (
+                    f"Unable to find relevant code in the project. "
+                    f"Found {e.details['chunks_found']} code chunks. "
+                    f"Please ensure the project is indexed and try a more specific request."
+                )
+                return result
+
+            # Warn about low confidence
+            if context.confidence_level == "low":
+                event = await self._emit_event(
+                    ProcessPhase.RETRIEVING,
+                    f"⚠️ Limited context found ({len(context.chunks)} chunks). Proceeding with caution.",
+                    0.25
+                )
+                result.events.append(event)
 
             # Log context retrieval
             if self.conversation_logger:
@@ -385,14 +421,43 @@ class Orchestrator:
             if self.conversation_logger:
                 self.conversation_logger.log_validation(validation.to_dict())
 
-            # 8. Retry if validation failed
+            # 8. Retry if validation failed (with circuit breaker)
+            initial_score = validation.score
+            previous_score = initial_score
             retry_count = 0
-            while not validation.approved and retry_count < MAX_RETRY_ATTEMPTS:
+
+            while not validation.approved and retry_count < self.config.MAX_FIX_ATTEMPTS:
                 retry_count += 1
+
+                # Circuit breaker - abort if score degrades
+                if self.config.ABORT_ON_SCORE_DEGRADATION:
+                    if validation.score < previous_score - self.config.SCORE_DEGRADATION_THRESHOLD:
+                        logger.error(
+                            f"[ORCHESTRATOR] Score degraded: {previous_score} -> {validation.score}. Aborting."
+                        )
+                        event = await self._emit_event(
+                            ProcessPhase.FAILED,
+                            f"Fix attempts are making code worse (score: {previous_score} → {validation.score})",
+                            0.9
+                        )
+                        result.events.append(event)
+                        break
+
+                    if validation.score < self.config.MIN_VALIDATION_SCORE:
+                        logger.error(f"[ORCHESTRATOR] Score too low: {validation.score}. Aborting.")
+                        event = await self._emit_event(
+                            ProcessPhase.FAILED,
+                            f"Validation score too low ({validation.score}). Manual review required.",
+                            0.9
+                        )
+                        result.events.append(event)
+                        break
+
+                previous_score = validation.score
 
                 event = await self._emit_event(
                     ProcessPhase.FIXING,
-                    f"Fixing issues (attempt {retry_count}/{MAX_RETRY_ATTEMPTS})...",
+                    f"Fixing issues (attempt {retry_count}/{self.config.MAX_FIX_ATTEMPTS})...",
                     0.85 + (0.05 * retry_count),
                     {"issues": [i.to_dict() for i in validation.errors]},
                 )
@@ -481,7 +546,7 @@ class Orchestrator:
                     fixed_files = [execution_results[idx].file for idx in files_to_fix if execution_results[idx].success]
                     self.conversation_logger.log_fix_attempt(
                         attempt_number=retry_count,
-                        max_attempts=MAX_RETRY_ATTEMPTS,
+                        max_attempts=self.config.MAX_FIX_ATTEMPTS,
                         issues=all_issues,
                         fixed_files=fixed_files,
                     )
