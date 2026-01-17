@@ -13,6 +13,17 @@ from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
 
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely format a string template with values that may contain curly braces.
+    """
+    result = template
+    for key, value in kwargs.items():
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, str(value))
+    return result
+
 INTENT_ANALYSIS_PROMPT = """<role>
 You are an expert Laravel architect specializing in understanding developer requests and translating them into actionable technical specifications. Your analysis directly determines which code changes will be made, so accuracy is critical.
 </role>
@@ -200,7 +211,8 @@ class IntentAnalyzer:
 
         # Build the prompt
         context = project_context or "Laravel project (no additional context provided)"
-        prompt = INTENT_ANALYSIS_PROMPT.format(
+        prompt = safe_format(
+            INTENT_ANALYSIS_PROMPT,
             project_context=context,
             user_input=user_input,
         )

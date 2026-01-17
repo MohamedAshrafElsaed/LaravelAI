@@ -7,6 +7,7 @@ Uses Claude Sonnet for high-quality code generation.
 import difflib
 import json
 import logging
+import re
 from typing import Optional
 from dataclasses import dataclass, field, asdict
 
@@ -15,6 +16,20 @@ from app.agents.context_retriever import RetrievedContext
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
+
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely format a string template with values that may contain curly braces.
+
+    Uses manual placeholder replacement to avoid Python's format() issues
+    with curly braces in values (common in code).
+    """
+    result = template
+    for key, value in kwargs.items():
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, str(value))
+    return result
 
 EXECUTION_PROMPT_CREATE = """<role>
 You are an expert Laravel developer creating production-ready code. Your code will be directly added to the codebase, so it must be complete, correct, and follow all project conventions.
@@ -510,7 +525,8 @@ class Executor:
         project_context: str = "",
     ) -> ExecutionResult:
         """Execute a create action."""
-        prompt = EXECUTION_PROMPT_CREATE.format(
+        prompt = safe_format(
+            EXECUTION_PROMPT_CREATE,
             description=step.description,
             file_path=step.file,
             project_context=project_context,
@@ -543,7 +559,8 @@ class Executor:
         project_context: str = "",
     ) -> ExecutionResult:
         """Execute a modify action."""
-        prompt = EXECUTION_PROMPT_MODIFY.format(
+        prompt = safe_format(
+            EXECUTION_PROMPT_MODIFY,
             description=step.description,
             file_path=step.file,
             current_content=current_content,
@@ -575,7 +592,8 @@ class Executor:
         current_content: str,
     ) -> ExecutionResult:
         """Execute a delete action."""
-        prompt = EXECUTION_PROMPT_DELETE.format(
+        prompt = safe_format(
+            EXECUTION_PROMPT_DELETE,
             description=step.description,
             file_path=step.file,
             current_content=current_content,
@@ -780,7 +798,8 @@ Respond ONLY with the JSON object."""
         ext = result.file.split(".")[-1] if "." in result.file else "php"
         language = "php" if ext == "php" else ext
 
-        prompt = SELF_VERIFICATION_PROMPT.format(
+        prompt = safe_format(
+            SELF_VERIFICATION_PROMPT,
             file_path=result.file,
             action=result.action,
             language=language,
@@ -832,7 +851,8 @@ Respond ONLY with the JSON object."""
         """
         logger.info(f"[EXECUTOR] Attempting error recovery for {step.file}")
 
-        prompt = ERROR_RECOVERY_PROMPT.format(
+        prompt = safe_format(
+            ERROR_RECOVERY_PROMPT,
             description=step.description,
             file_path=step.file,
             error_type=error_type,

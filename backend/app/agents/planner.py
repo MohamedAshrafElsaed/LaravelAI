@@ -15,6 +15,17 @@ from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
 
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely format a string template with values that may contain curly braces.
+    """
+    result = template
+    for key, value in kwargs.items():
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, str(value))
+    return result
+
 PLANNING_PROMPT = """<role>
 You are a senior Laravel architect creating implementation plans. Your plans directly drive code generation, so they must be precise, complete, and correctly ordered. A well-structured plan prevents compilation errors and ensures dependencies are created before they're needed.
 </role>
@@ -289,7 +300,8 @@ class Planner:
         logger.info(f"[PLANNER] Creating plan for: {user_input[:100]}...")
 
         # Build the prompt
-        prompt = PLANNING_PROMPT.format(
+        prompt = safe_format(
+            PLANNING_PROMPT,
             user_input=user_input,
             task_type=intent.task_type,
             scope=intent.scope,

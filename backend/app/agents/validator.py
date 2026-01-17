@@ -16,6 +16,17 @@ from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
 
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely format a string template with values that may contain curly braces.
+    """
+    result = template
+    for key, value in kwargs.items():
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, str(value))
+    return result
+
 VALIDATION_PROMPT = """<role>
 You are a senior Laravel code reviewer and quality assurance expert. Your validation directly determines whether code ships to production, so thoroughness and accuracy are critical. You have deep expertise in Laravel conventions, PHP best practices, security vulnerabilities, and code quality standards.
 </role>
@@ -398,7 +409,8 @@ class Validator:
         # Format changes for review
         changes_str = self._format_changes(results)
 
-        prompt = VALIDATION_PROMPT.format(
+        prompt = safe_format(
+            VALIDATION_PROMPT,
             user_input=user_input,
             task_type=intent.task_type,
             scope=intent.scope,
