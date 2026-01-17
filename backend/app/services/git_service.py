@@ -3,12 +3,14 @@ Git service for cloning and managing repositories.
 """
 import os
 import shutil
+import logging
 from pathlib import Path
 from typing import Optional, List
 
 from git import Repo, GitCommandError
 from git.exc import InvalidGitRepositoryError
 
+logger = logging.getLogger(__name__)
 
 # Base directory for cloned repositories
 REPOS_BASE_DIR = "/tmp/repos"
@@ -77,18 +79,23 @@ class GitService:
         Raises:
             GitServiceError: If cloning fails
         """
+        logger.info(f"[GIT] Starting clone for {repo_full_name}, project_id={project_id}, branch={branch}")
         clone_path = self._get_clone_path(project_id)
+        logger.debug(f"[GIT] Clone path: {clone_path}")
 
         # Remove existing directory if it exists
         if os.path.exists(clone_path):
+            logger.info(f"[GIT] Removing existing directory: {clone_path}")
             shutil.rmtree(clone_path)
 
         # Create parent directory
+        logger.debug(f"[GIT] Creating parent directory for clone")
         os.makedirs(os.path.dirname(clone_path), exist_ok=True)
 
         try:
             # Get authenticated URL
             repo_url = self._get_authenticated_url(repo_full_name)
+            logger.debug(f"[GIT] Using authenticated URL for cloning")
 
             # Clone with limited depth for faster initial clone
             clone_args = {
@@ -100,27 +107,35 @@ class GitService:
                 clone_args["branch"] = branch
 
             # Clone the repository
+            logger.info(f"[GIT] Executing git clone (shallow, single-branch)")
             repo = Repo.clone_from(repo_url, clone_path, **clone_args)
+            logger.info(f"[GIT] Clone successful, configuring sparse checkout")
 
             # Configure sparse checkout to skip large directories
             self._configure_sparse_checkout(repo)
+            logger.info(f"[GIT] Clone completed successfully at {clone_path}")
 
             return clone_path
 
         except GitCommandError as e:
+            logger.error(f"[GIT] GitCommandError during clone: {str(e)}")
             # Clean up partial clone
             if os.path.exists(clone_path):
+                logger.debug(f"[GIT] Cleaning up partial clone at {clone_path}")
                 shutil.rmtree(clone_path, ignore_errors=True)
 
             error_msg = str(e)
             if "Authentication failed" in error_msg or "could not read Username" in error_msg:
+                logger.error(f"[GIT] Authentication failed for {repo_full_name}")
                 raise GitServiceError("GitHub authentication failed. Token may be invalid or expired.")
             if "Repository not found" in error_msg:
+                logger.error(f"[GIT] Repository not found: {repo_full_name}")
                 raise GitServiceError("Repository not found. Check if you have access.")
 
             raise GitServiceError(f"Failed to clone repository: {error_msg}")
 
         except Exception as e:
+            logger.exception(f"[GIT] Unexpected error during clone: {str(e)}")
             # Clean up partial clone
             if os.path.exists(clone_path):
                 shutil.rmtree(clone_path, ignore_errors=True)
@@ -140,6 +155,7 @@ class GitService:
         Args:
             repo: The cloned repository object
         """
+        logger.debug(f"[GIT] Configuring sparse checkout")
         try:
             # Enable sparse checkout
             repo.config_writer().set_value("core", "sparseCheckout", "true").release()
@@ -162,10 +178,11 @@ class GitService:
 
             # Apply sparse checkout
             repo.git.checkout()
+            logger.debug(f"[GIT] Sparse checkout configured successfully")
 
-        except Exception:
+        except Exception as e:
             # Non-fatal - repo is still usable without sparse checkout
-            pass
+            logger.warning(f"[GIT] Failed to configure sparse checkout: {str(e)}")
 
     def pull_latest(self, clone_path: str) -> bool:
         """
@@ -180,13 +197,16 @@ class GitService:
         Raises:
             GitServiceError: If pull fails
         """
+        logger.info(f"[GIT] Pulling latest changes for {clone_path}")
         try:
             if not os.path.exists(clone_path):
+                logger.error(f"[GIT] Repository not found at {clone_path}")
                 raise GitServiceError("Repository not found at specified path.")
 
             repo = Repo(clone_path)
 
             if repo.bare:
+                logger.error(f"[GIT] Cannot pull on bare repository: {clone_path}")
                 raise GitServiceError("Cannot pull on a bare repository.")
 
             # Fetch first to check for changes
@@ -198,28 +218,34 @@ class GitService:
             if "@github.com" not in current_url:
                 # URL doesn't have auth, need to update
                 # This shouldn't happen normally but handle it
-                pass
+                logger.warning(f"[GIT] Remote URL missing authentication")
 
             # Pull changes
+            logger.debug(f"[GIT] Executing git pull")
             fetch_info = origin.pull()
 
             # Check if there were actual changes
             for info in fetch_info:
                 if info.flags & info.HEAD_UPTODATE:
+                    logger.info(f"[GIT] Repository already up to date")
                     return False
 
+            logger.info(f"[GIT] Pulled new changes successfully")
             return True
 
         except InvalidGitRepositoryError:
+            logger.error(f"[GIT] Invalid git repository: {clone_path}")
             raise GitServiceError("Directory is not a valid git repository.")
 
         except GitCommandError as e:
+            logger.error(f"[GIT] GitCommandError during pull: {str(e)}")
             error_msg = str(e)
             if "Authentication failed" in error_msg:
                 raise GitServiceError("GitHub authentication failed. Token may be invalid or expired.")
             raise GitServiceError(f"Failed to pull changes: {error_msg}")
 
         except Exception as e:
+            logger.exception(f"[GIT] Unexpected error during pull: {str(e)}")
             raise GitServiceError(f"Unexpected error during pull: {str(e)}")
 
     def get_changed_files(
@@ -240,6 +266,7 @@ class GitService:
         Raises:
             GitServiceError: If operation fails
         """
+        logger.info(f"[GIT] Getting changed files for {clone_path}, since_commit={since_commit}")
         try:
             repo = Repo(clone_path)
 
@@ -250,11 +277,15 @@ class GitService:
                 diff = repo.git.diff("--name-only", "HEAD~1", "HEAD")
 
             if not diff:
+                logger.info(f"[GIT] No changed files found")
                 return []
 
-            return [f for f in diff.split("\n") if f.strip()]
+            changed = [f for f in diff.split("\n") if f.strip()]
+            logger.info(f"[GIT] Found {len(changed)} changed files")
+            return changed
 
         except Exception as e:
+            logger.error(f"[GIT] Failed to get changed files: {str(e)}")
             raise GitServiceError(f"Failed to get changed files: {str(e)}")
 
     def cleanup_repo(self, project_id: str) -> bool:
@@ -267,15 +298,19 @@ class GitService:
         Returns:
             True if cleanup succeeded, False if directory didn't exist
         """
+        logger.info(f"[GIT] Cleaning up repository for project_id={project_id}")
         clone_path = self._get_clone_path(project_id)
 
         if not os.path.exists(clone_path):
+            logger.info(f"[GIT] Repository directory does not exist: {clone_path}")
             return False
 
         try:
             shutil.rmtree(clone_path)
+            logger.info(f"[GIT] Repository cleaned up successfully: {clone_path}")
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"[GIT] Failed to cleanup repository: {str(e)}")
             return False
 
     def get_file_content(
@@ -294,17 +329,23 @@ class GitService:
             File content as string, or None if file doesn't exist
         """
         full_path = os.path.join(clone_path, file_path)
+        logger.debug(f"[GIT] Reading file content: {full_path}")
 
         if not os.path.exists(full_path):
+            logger.debug(f"[GIT] File does not exist: {full_path}")
             return None
 
         if not os.path.isfile(full_path):
+            logger.debug(f"[GIT] Path is not a file: {full_path}")
             return None
 
         try:
             with open(full_path, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
-        except Exception:
+                content = f.read()
+                logger.debug(f"[GIT] Read {len(content)} bytes from {file_path}")
+                return content
+        except Exception as e:
+            logger.error(f"[GIT] Failed to read file {file_path}: {str(e)}")
             return None
 
     def list_php_files(self, clone_path: str) -> List[str]:
@@ -317,6 +358,7 @@ class GitService:
         Returns:
             List of relative paths to PHP files
         """
+        logger.info(f"[GIT] Listing PHP files in {clone_path}")
         php_files = []
         base_path = Path(clone_path)
 
@@ -336,4 +378,5 @@ class GitService:
                     relative_path = full_path.relative_to(base_path)
                     php_files.append(str(relative_path))
 
+        logger.info(f"[GIT] Found {len(php_files)} PHP files")
         return php_files

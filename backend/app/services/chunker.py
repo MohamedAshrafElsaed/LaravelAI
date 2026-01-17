@@ -2,10 +2,12 @@
 Code chunker service.
 Splits parsed code files into logical chunks for embedding.
 """
+import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import tiktoken
 
+logger = logging.getLogger(__name__)
 
 # Default maximum tokens per chunk
 DEFAULT_MAX_TOKENS = 500
@@ -165,6 +167,7 @@ class Chunker:
         Returns:
             List of CodeChunk objects
         """
+        logger.info(f"[CHUNKER] Chunking PHP file: {file_path}")
         chunks = []
         source_lines = source_code.split("\n")
 
@@ -362,6 +365,7 @@ class Chunker:
                 metadata={"file_type": "php"},
             ))
 
+        logger.info(f"[CHUNKER] PHP file chunked: {len(chunks)} chunks created")
         return chunks
 
     def chunk_blade_file(
@@ -381,6 +385,7 @@ class Chunker:
         Returns:
             List of CodeChunk objects
         """
+        logger.info(f"[CHUNKER] Chunking Blade file: {file_path}")
         chunks = []
 
         # Create a summary chunk with template metadata
@@ -449,6 +454,7 @@ class Chunker:
                 },
             ))
 
+        logger.info(f"[CHUNKER] Blade file chunked: {len(chunks)} chunks created")
         return chunks
 
     def chunk_generic_file(
@@ -497,6 +503,7 @@ def chunk_file(
     Returns:
         List of chunk dictionaries
     """
+    logger.info(f"[CHUNKER] chunk_file called for {file_path}, type={file_type}")
     chunker = Chunker(max_tokens=max_tokens)
 
     if file_type == "php" and parsed_data:
@@ -506,4 +513,5 @@ def chunk_file(
     else:
         chunks = chunker.chunk_generic_file(file_path, source_code, file_type)
 
+    logger.info(f"[CHUNKER] chunk_file completed for {file_path}: {len(chunks)} chunks")
     return [chunk.to_dict() for chunk in chunks]

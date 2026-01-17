@@ -1,10 +1,13 @@
 """Project/repository management routes."""
 import asyncio
 import shutil
+import logging
 from typing import List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select
@@ -95,37 +98,48 @@ async def clone_project_task(
         project_id: The project's UUID
         github_token: GitHub access token
     """
+    logger.info(f"[CLONE_TASK] Starting clone task for project_id={project_id}")
+
     # Create a new database session for background task
     engine = create_async_engine(settings.database_url)
     async_session = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
+    logger.debug(f"[CLONE_TASK] Database session created for project_id={project_id}")
 
     async with async_session() as db:
         try:
             # Fetch project
+            logger.debug(f"[CLONE_TASK] Fetching project from database: {project_id}")
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
             project = result.scalar_one_or_none()
 
             if not project:
+                logger.error(f"[CLONE_TASK] Project not found in database: {project_id}")
                 return
 
+            logger.info(f"[CLONE_TASK] Found project: {project.repo_full_name}, branch: {project.default_branch}")
+
             # Clone repository
+            logger.info(f"[CLONE_TASK] Starting git clone for {project.repo_full_name}")
             git_service = GitService(github_token)
             clone_path = git_service.clone_repo(
                 project_id=str(project.id),
                 repo_full_name=project.repo_full_name,
                 branch=project.default_branch,
             )
+            logger.info(f"[CLONE_TASK] Clone successful, path: {clone_path}")
 
             # Update project with clone path
             project.clone_path = clone_path
             project.status = ProjectStatus.PENDING.value  # Ready for indexing
             project.error_message = None
             await db.commit()
+            logger.info(f"[CLONE_TASK] Project status updated to PENDING, clone_path saved")
 
         except GitServiceError as e:
+            logger.error(f"[CLONE_TASK] Git service error for project {project_id}: {str(e)}")
             # Update project with error
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
@@ -134,8 +148,10 @@ async def clone_project_task(
                 project.status = ProjectStatus.ERROR.value
                 project.error_message = str(e)
                 await db.commit()
+                logger.info(f"[CLONE_TASK] Project status updated to ERROR")
 
         except Exception as e:
+            logger.exception(f"[CLONE_TASK] Unexpected error for project {project_id}: {str(e)}")
             # Update project with error
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
@@ -144,8 +160,10 @@ async def clone_project_task(
                 project.status = ProjectStatus.ERROR.value
                 project.error_message = f"Unexpected error: {str(e)}"
                 await db.commit()
+                logger.info(f"[CLONE_TASK] Project status updated to ERROR")
 
     await engine.dispose()
+    logger.info(f"[CLONE_TASK] Clone task completed for project_id={project_id}")
 
 
 async def index_project_task(
@@ -159,11 +177,15 @@ async def index_project_task(
         project_id: The project's UUID
         embedding_provider: Embedding provider to use
     """
+    logger.info(f"[INDEX_TASK] Starting indexing task for project_id={project_id}")
+    logger.info(f"[INDEX_TASK] Using embedding provider: {embedding_provider}")
+
     # Create a new database session for background task
     engine = create_async_engine(settings.database_url)
     async_session = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
+    logger.debug(f"[INDEX_TASK] Database session created for project_id={project_id}")
 
     async with async_session() as db:
         try:
@@ -173,16 +195,21 @@ async def index_project_task(
                 if embedding_provider == "voyage"
                 else EmbeddingProvider.OPENAI
             )
+            logger.info(f"[INDEX_TASK] Resolved embedding provider: {provider}")
 
             # Create indexer and run
+            logger.info(f"[INDEX_TASK] Creating ProjectIndexer instance")
             indexer = ProjectIndexer(
                 db=db,
                 embedding_provider=provider,
             )
 
+            logger.info(f"[INDEX_TASK] Starting indexer.index_project for {project_id}")
             await indexer.index_project(project_id)
+            logger.info(f"[INDEX_TASK] Indexing completed successfully for {project_id}")
 
         except Exception as e:
+            logger.exception(f"[INDEX_TASK] Indexing failed for project {project_id}: {str(e)}")
             # Update project with error
             stmt = select(Project).where(Project.id == project_id)
             result = await db.execute(stmt)
@@ -191,8 +218,10 @@ async def index_project_task(
                 project.status = ProjectStatus.ERROR.value
                 project.error_message = f"Indexing failed: {str(e)}"
                 await db.commit()
+                logger.info(f"[INDEX_TASK] Project status updated to ERROR")
 
     await engine.dispose()
+    logger.info(f"[INDEX_TASK] Index task completed for project_id={project_id}")
 
 
 @router.get("/", response_model=List[ProjectResponse])
@@ -201,11 +230,13 @@ async def list_projects(
     current_user: User = Depends(get_current_user),
 ) -> List[ProjectResponse]:
     """List all projects for current user."""
+    logger.info(f"[API] GET /projects - user_id={current_user.id}")
     stmt = select(Project).where(Project.user_id == current_user.id).order_by(
         Project.updated_at.desc()
     )
     result = await db.execute(stmt)
     projects = result.scalars().all()
+    logger.info(f"[API] GET /projects - returning {len(projects)} projects")
     return projects
 
 
@@ -225,7 +256,10 @@ async def create_project(
     3. Create the project record
     4. Trigger a background clone job
     """
+    logger.info(f"[API] POST /projects - user_id={current_user.id}, github_repo_id={project_data.github_repo_id}")
+
     # Check if project already exists for this user
+    logger.debug(f"[API] Checking if project already exists for repo_id={project_data.github_repo_id}")
     stmt = select(Project).where(
         Project.user_id == current_user.id,
         Project.github_repo_id == project_data.github_repo_id,
@@ -234,17 +268,21 @@ async def create_project(
     existing = result.scalar_one_or_none()
 
     if existing:
+        logger.warning(f"[API] Project already exists for repo_id={project_data.github_repo_id}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project already exists for this repository.",
         )
 
     # Fetch repo details from GitHub
+    logger.info(f"[API] Fetching repo details from GitHub for repo_id={project_data.github_repo_id}")
     try:
         github_token = decrypt_token(current_user.github_access_token)
         g = Github(github_token)
         repo = g.get_repo(project_data.github_repo_id)
+        logger.info(f"[API] GitHub repo found: {repo.full_name}")
     except GithubException as e:
+        logger.error(f"[API] GitHub API error: {str(e)}")
         if e.status == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -256,6 +294,7 @@ async def create_project(
         )
 
     # Create project
+    logger.info(f"[API] Creating project record for {repo.full_name}")
     project = Project(
         user_id=current_user.id,
         github_repo_id=repo.id,
@@ -269,14 +308,17 @@ async def create_project(
     db.add(project)
     await db.commit()
     await db.refresh(project)
+    logger.info(f"[API] Project created with id={project.id}, status={project.status}")
 
     # Trigger background clone job
+    logger.info(f"[API] Triggering background clone task for project_id={project.id}")
     background_tasks.add_task(
         clone_project_task,
         str(project.id),
         github_token,
     )
 
+    logger.info(f"[API] POST /projects completed - returning project_id={project.id}")
     return project
 
 
@@ -287,6 +329,7 @@ async def get_project(
     current_user: User = Depends(get_current_user),
 ) -> ProjectDetailResponse:
     """Get a specific project by ID."""
+    logger.info(f"[API] GET /projects/{project_id} - user_id={current_user.id}")
     stmt = select(Project).where(
         Project.id == project_id,
         Project.user_id == current_user.id,
@@ -295,11 +338,13 @@ async def get_project(
     project = result.scalar_one_or_none()
 
     if not project:
+        logger.warning(f"[API] Project not found: {project_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         )
 
+    logger.info(f"[API] GET /projects/{project_id} - returning project status={project.status}")
     return project
 
 
@@ -317,6 +362,8 @@ async def delete_project(
     2. Remove the cloned repository from disk if it exists
     3. Delete the vector collection from Qdrant
     """
+    logger.info(f"[API] DELETE /projects/{project_id} - user_id={current_user.id}")
+
     # Fetch project
     stmt = select(Project).where(
         Project.id == project_id,
@@ -326,30 +373,36 @@ async def delete_project(
     project = result.scalar_one_or_none()
 
     if not project:
+        logger.warning(f"[API] Project not found for deletion: {project_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         )
 
+    logger.info(f"[API] Deleting project {project.repo_full_name}")
+
     # Cleanup cloned repo directory if it exists
     if project.clone_path:
+        logger.info(f"[API] Removing cloned repo directory: {project.clone_path}")
         try:
             shutil.rmtree(project.clone_path, ignore_errors=True)
-        except Exception:
-            # Log but don't fail deletion
-            pass
+            logger.info(f"[API] Cloned repo directory removed successfully")
+        except Exception as e:
+            logger.warning(f"[API] Failed to remove clone directory: {str(e)}")
 
     # Cleanup vector collection
+    logger.info(f"[API] Deleting vector collection for project_id={project.id}")
     try:
         vector_store = VectorStore()
         vector_store.delete_collection(str(project.id))
-    except Exception:
-        # Log but don't fail deletion
-        pass
+        logger.info(f"[API] Vector collection deleted successfully")
+    except Exception as e:
+        logger.warning(f"[API] Failed to delete vector collection: {str(e)}")
 
     # Delete project (cascade will handle related records)
     await db.delete(project)
     await db.commit()
+    logger.info(f"[API] Project {project_id} deleted successfully")
 
 
 @router.post("/{project_id}/index", response_model=ProjectResponse)
@@ -368,6 +421,8 @@ async def start_indexing(
     3. Generate vector embeddings for semantic search
     4. Store embeddings in Qdrant
     """
+    logger.info(f"[API] POST /projects/{project_id}/index - user_id={current_user.id}")
+
     # Fetch project
     stmt = select(Project).where(
         Project.id == project_id,
@@ -377,41 +432,52 @@ async def start_indexing(
     project = result.scalar_one_or_none()
 
     if not project:
+        logger.warning(f"[API] Project not found for indexing: {project_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         )
 
+    logger.info(f"[API] Project found: {project.repo_full_name}, current status={project.status}")
+
     if project.status == ProjectStatus.INDEXING.value:
+        logger.warning(f"[API] Project {project_id} is already being indexed")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project is already being indexed.",
         )
 
     if project.status == ProjectStatus.CLONING.value:
+        logger.warning(f"[API] Project {project_id} is currently being cloned")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project is currently being cloned. Wait for cloning to complete.",
         )
 
     if not project.clone_path:
+        logger.warning(f"[API] Project {project_id} has no clone_path")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Project has not been cloned yet. Clone the repository first.",
         )
+
+    logger.info(f"[API] Project clone_path: {project.clone_path}")
 
     # Update status to indexing
     project.status = ProjectStatus.INDEXING.value
     project.error_message = None
     await db.commit()
     await db.refresh(project)
+    logger.info(f"[API] Project status updated to INDEXING")
 
     # Trigger background indexing job
+    logger.info(f"[API] Triggering background indexing task for project_id={project.id}")
     background_tasks.add_task(
         index_project_task,
         str(project.id),
     )
 
+    logger.info(f"[API] POST /projects/{project_id}/index completed")
     return project
 
 
@@ -430,6 +496,8 @@ async def get_indexing_status(
     - Current file being processed
     - Error information if failed
     """
+    logger.debug(f"[API] GET /projects/{project_id}/index/status - user_id={current_user.id}")
+
     # Verify project access
     stmt = select(Project).where(
         Project.id == project_id,
@@ -439,6 +507,7 @@ async def get_indexing_status(
     project = result.scalar_one_or_none()
 
     if not project:
+        logger.warning(f"[API] Project not found for status check: {project_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
@@ -446,6 +515,7 @@ async def get_indexing_status(
 
     # Get progress from in-memory tracker
     progress = get_indexing_progress(project_id)
+    logger.debug(f"[API] Project {project_id} - DB status={project.status}, in-memory progress={progress is not None}")
 
     if progress:
         return IndexingStatusResponse(
@@ -526,6 +596,8 @@ async def start_cloning(
     """
     Clone or re-clone a project's repository.
     """
+    logger.info(f"[API] POST /projects/{project_id}/clone - user_id={current_user.id}")
+
     # Fetch project
     stmt = select(Project).where(
         Project.id == project_id,
@@ -535,12 +607,16 @@ async def start_cloning(
     project = result.scalar_one_or_none()
 
     if not project:
+        logger.warning(f"[API] Project not found for cloning: {project_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         )
 
+    logger.info(f"[API] Project found: {project.repo_full_name}, current status={project.status}")
+
     if project.status in [ProjectStatus.CLONING.value, ProjectStatus.INDEXING.value]:
+        logger.warning(f"[API] Project {project_id} is currently {project.status}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Project is currently being {project.status}.",
@@ -551,8 +627,10 @@ async def start_cloning(
     project.error_message = None
     await db.commit()
     await db.refresh(project)
+    logger.info(f"[API] Project status updated to CLONING")
 
     # Get GitHub token and trigger clone
+    logger.info(f"[API] Triggering background clone task for project_id={project.id}")
     github_token = decrypt_token(current_user.github_access_token)
     background_tasks.add_task(
         clone_project_task,
@@ -560,4 +638,5 @@ async def start_cloning(
         github_token,
     )
 
+    logger.info(f"[API] POST /projects/{project_id}/clone completed")
     return project

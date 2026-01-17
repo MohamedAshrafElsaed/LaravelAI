@@ -2,11 +2,13 @@
 PHP parser using tree-sitter.
 Extracts classes, methods, properties, use statements, and namespaces.
 """
+import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict, field
 import tree_sitter_php as tsphp
 from tree_sitter import Language, Parser
 
+logger = logging.getLogger(__name__)
 
 # Initialize tree-sitter PHP language
 PHP_LANGUAGE = Language(tsphp.language_php())
@@ -477,6 +479,7 @@ class PHPParser:
         Returns:
             PHPParseResult containing parsed information
         """
+        logger.debug(f"[PHP_PARSER] Parsing PHP source code ({len(source_code)} bytes)")
         result = PHPParseResult()
         source_bytes = source_code.encode("utf-8")
 
@@ -486,6 +489,7 @@ class PHPParser:
 
             # Check for parse errors
             if root.has_error:
+                logger.warning(f"[PHP_PARSER] Source code contains syntax errors")
                 result.errors.append("Source code contains syntax errors")
 
             # Walk the tree
@@ -535,7 +539,10 @@ class PHPParser:
 
             walk(root)
 
+            logger.debug(f"[PHP_PARSER] Parse completed: {len(result.classes)} classes, {len(result.functions)} functions, {len(result.use_statements)} use statements")
+
         except Exception as e:
+            logger.error(f"[PHP_PARSER] Parse error: {str(e)}")
             result.errors.append(f"Parse error: {str(e)}")
 
         return result
@@ -550,11 +557,15 @@ class PHPParser:
         Returns:
             PHPParseResult containing parsed information
         """
+        logger.info(f"[PHP_PARSER] Parsing file: {file_path}")
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 source_code = f.read()
-            return self.parse(source_code)
+            result = self.parse(source_code)
+            logger.info(f"[PHP_PARSER] File parsed successfully: {file_path}")
+            return result
         except Exception as e:
+            logger.error(f"[PHP_PARSER] Failed to read file {file_path}: {str(e)}")
             result = PHPParseResult()
             result.errors.append(f"Failed to read file: {str(e)}")
             return result
@@ -570,6 +581,7 @@ def parse_php_file(file_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing parsed PHP structure
     """
+    logger.info(f"[PHP_PARSER] parse_php_file called for {file_path}")
     parser = PHPParser()
     result = parser.parse_file(file_path)
     return result.to_dict()
@@ -585,6 +597,7 @@ def parse_php_content(source_code: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing parsed PHP structure
     """
+    logger.debug(f"[PHP_PARSER] parse_php_content called ({len(source_code)} bytes)")
     parser = PHPParser()
     result = parser.parse(source_code)
     return result.to_dict()

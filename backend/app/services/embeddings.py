@@ -3,12 +3,15 @@ Embeddings service for generating vector embeddings.
 Supports OpenAI and Voyage AI embedding models.
 """
 import asyncio
+import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingProvider(str, Enum):
@@ -69,9 +72,11 @@ class EmbeddingService:
             model: The model to use (defaults to provider's default)
             api_key: API key (defaults to config)
         """
+        logger.info(f"[EMBEDDINGS] Initializing EmbeddingService with provider={provider.value}")
         self.provider = provider
         self.model = model or DEFAULT_MODELS[provider]
         self.batch_size = BATCH_SIZES[provider]
+        logger.info(f"[EMBEDDINGS] Using model={self.model}, batch_size={self.batch_size}")
 
         # Get API key from config if not provided
         if api_key:
@@ -82,12 +87,14 @@ class EmbeddingService:
             self.api_key = settings.voyage_api_key
 
         if not self.api_key:
+            logger.error(f"[EMBEDDINGS] No API key configured for {provider.value}")
             raise EmbeddingError(
                 f"No API key configured for {provider.value}. "
                 f"Set {'OPENAI_API_KEY' if provider == EmbeddingProvider.OPENAI else 'VOYAGE_API_KEY'} "
                 "in your environment."
             )
 
+        logger.debug(f"[EMBEDDINGS] API key configured (length={len(self.api_key)})")
         # HTTP client for async requests
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -104,6 +111,7 @@ class EmbeddingService:
 
     async def _embed_openai(self, texts: List[str]) -> EmbeddingResult:
         """Generate embeddings using OpenAI API."""
+        logger.debug(f"[EMBEDDINGS] Calling OpenAI API for {len(texts)} texts")
         client = await self._get_client()
 
         try:
@@ -122,12 +130,14 @@ class EmbeddingService:
             if response.status_code != 200:
                 error_data = response.json()
                 error_msg = error_data.get("error", {}).get("message", response.text)
+                logger.error(f"[EMBEDDINGS] OpenAI API error: {error_msg}")
                 raise EmbeddingError(f"OpenAI API error: {error_msg}")
 
             data = response.json()
             embeddings = [item["embedding"] for item in data["data"]]
             total_tokens = data.get("usage", {}).get("total_tokens", 0)
 
+            logger.debug(f"[EMBEDDINGS] OpenAI returned {len(embeddings)} embeddings, {total_tokens} tokens used")
             return EmbeddingResult(
                 embeddings=embeddings,
                 model=self.model,
@@ -136,6 +146,7 @@ class EmbeddingService:
             )
 
         except httpx.RequestError as e:
+            logger.error(f"[EMBEDDINGS] Network error calling OpenAI: {str(e)}")
             raise EmbeddingError(f"Network error calling OpenAI: {str(e)}")
 
     async def _embed_voyage(self, texts: List[str]) -> EmbeddingResult:
@@ -214,7 +225,10 @@ class EmbeddingService:
         Returns:
             List of embeddings (one per chunk)
         """
+        logger.info(f"[EMBEDDINGS] embed_chunks called with {len(chunks)} chunks")
+
         if not chunks:
+            logger.info(f"[EMBEDDINGS] No chunks to embed, returning empty list")
             return []
 
         # Extract texts
@@ -224,16 +238,22 @@ class EmbeddingService:
         non_empty_indices = [i for i, t in enumerate(texts) if t.strip()]
         non_empty_texts = [texts[i] for i in non_empty_indices]
 
+        logger.info(f"[EMBEDDINGS] {len(non_empty_texts)} non-empty texts to embed")
+
         if not non_empty_texts:
             # Return zero vectors for empty inputs
             dim = EMBEDDING_DIMENSIONS.get(self.model, 1536)
+            logger.warning(f"[EMBEDDINGS] All texts are empty, returning zero vectors")
             return [[0.0] * dim for _ in chunks]
 
         # Process in batches
         all_embeddings: List[List[float]] = []
+        total_batches = (len(non_empty_texts) + self.batch_size - 1) // self.batch_size
 
         for i in range(0, len(non_empty_texts), self.batch_size):
             batch = non_empty_texts[i:i + self.batch_size]
+            batch_num = i // self.batch_size + 1
+            logger.info(f"[EMBEDDINGS] Processing batch {batch_num}/{total_batches} ({len(batch)} texts)")
             result = await self.embed_batch(batch)
             all_embeddings.extend(result.embeddings)
 
@@ -248,6 +268,7 @@ class EmbeddingService:
         for idx, emb in zip(non_empty_indices, all_embeddings):
             final_embeddings[idx] = emb
 
+        logger.info(f"[EMBEDDINGS] embed_chunks completed: {len(all_embeddings)} embeddings generated (dimension={dim})")
         return final_embeddings
 
     async def embed_query(self, query: str) -> List[float]:

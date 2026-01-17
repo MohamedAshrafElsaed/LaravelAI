@@ -4,10 +4,12 @@ Scans Laravel project directories and returns file information.
 """
 import os
 import hashlib
+import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
+logger = logging.getLogger(__name__)
 
 # Directories to exclude from scanning
 EXCLUDED_DIRS = {
@@ -212,13 +214,18 @@ class LaravelScanner:
         Args:
             project_path: Path to the Laravel project root
         """
+        logger.info(f"[SCANNER] Initializing LaravelScanner for {project_path}")
         self.project_path = Path(project_path)
 
         if not self.project_path.exists():
+            logger.error(f"[SCANNER] Project path does not exist: {project_path}")
             raise ScannerError(f"Project path does not exist: {project_path}")
 
         if not self.project_path.is_dir():
+            logger.error(f"[SCANNER] Project path is not a directory: {project_path}")
             raise ScannerError(f"Project path is not a directory: {project_path}")
+
+        logger.debug(f"[SCANNER] LaravelScanner initialized successfully")
 
     def _should_exclude_dir(self, dir_path: Path) -> bool:
         """Check if a directory should be excluded from scanning."""
@@ -303,6 +310,7 @@ class LaravelScanner:
 
     def _detect_laravel_version(self) -> Optional[str]:
         """Detect Laravel version from composer.json or composer.lock."""
+        logger.debug(f"[SCANNER] Detecting Laravel version")
         composer_json = self.project_path / "composer.json"
 
         if composer_json.exists():
@@ -316,15 +324,19 @@ class LaravelScanner:
                 if "laravel/framework" in require:
                     version = require["laravel/framework"]
                     # Clean up version string (remove ^, ~, etc.)
-                    return version.lstrip("^~>=<")
+                    clean_version = version.lstrip("^~>=<")
+                    logger.info(f"[SCANNER] Detected Laravel version: {clean_version}")
+                    return clean_version
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[SCANNER] Failed to parse composer.json: {str(e)}")
 
+        logger.debug(f"[SCANNER] Laravel version not detected")
         return None
 
     def _detect_php_version(self) -> Optional[str]:
         """Detect PHP version from composer.json."""
+        logger.debug(f"[SCANNER] Detecting PHP version")
         composer_json = self.project_path / "composer.json"
 
         if composer_json.exists():
@@ -336,11 +348,14 @@ class LaravelScanner:
                 require = data.get("require", {})
                 if "php" in require:
                     version = require["php"]
-                    return version.lstrip("^~>=<")
+                    clean_version = version.lstrip("^~>=<")
+                    logger.info(f"[SCANNER] Detected PHP version: {clean_version}")
+                    return clean_version
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[SCANNER] Failed to parse composer.json for PHP version: {str(e)}")
 
+        logger.debug(f"[SCANNER] PHP version not detected")
         return None
 
     def scan(self) -> ScanResult:
@@ -350,17 +365,21 @@ class LaravelScanner:
         Returns:
             ScanResult containing files and statistics
         """
+        logger.info(f"[SCANNER] Starting scan of {self.project_path}")
         files: List[FileInfo] = []
         stats = ScanStats()
+        skipped_dirs = 0
 
         for root, dirs, filenames in os.walk(self.project_path):
             current_path = Path(root)
 
             # Filter out excluded directories
+            original_dir_count = len(dirs)
             dirs[:] = [
                 d for d in dirs
                 if not self._should_exclude_dir(current_path / d)
             ]
+            skipped_dirs += original_dir_count - len(dirs)
 
             for filename in filenames:
                 file_path = current_path / filename
@@ -419,13 +438,19 @@ class LaravelScanner:
                     elif laravel_type == "config":
                         stats.config_files += 1
 
-                except Exception:
+                except Exception as e:
                     # Skip files that can't be read
+                    logger.warning(f"[SCANNER] Failed to process file {file_path}: {str(e)}")
                     continue
 
         # Detect versions
         laravel_version = self._detect_laravel_version()
         php_version = self._detect_php_version()
+
+        logger.info(f"[SCANNER] Scan completed: {stats.total_files} files found")
+        logger.info(f"[SCANNER] PHP: {stats.php_files}, Blade: {stats.blade_files}, Vue: {stats.vue_files}")
+        logger.info(f"[SCANNER] Controllers: {stats.controllers}, Models: {stats.models}, Migrations: {stats.migrations}")
+        logger.info(f"[SCANNER] Total size: {stats.total_size_bytes} bytes, Skipped dirs: {skipped_dirs}")
 
         return ScanResult(
             files=files,
@@ -448,6 +473,8 @@ def scan_laravel_project(path: str) -> Dict[str, Any]:
     Raises:
         ScannerError: If scanning fails
     """
+    logger.info(f"[SCANNER] scan_laravel_project called for {path}")
     scanner = LaravelScanner(path)
     result = scanner.scan()
+    logger.info(f"[SCANNER] scan_laravel_project completed for {path}")
     return result.to_dict()

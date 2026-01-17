@@ -3,8 +3,11 @@ Blade template parser using regex patterns.
 Extracts directives, variables, components, and structure.
 """
 import re
+import logging
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, asdict, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -282,6 +285,7 @@ class BladeParser:
         Returns:
             BladeParseResult containing parsed information
         """
+        logger.debug(f"[BLADE_PARSER] Parsing Blade content ({len(content)} bytes)")
         result = BladeParseResult()
 
         try:
@@ -453,8 +457,10 @@ class BladeParser:
                     result.props.append(prop_match.group(1))
 
         except Exception as e:
+            logger.error(f"[BLADE_PARSER] Parse error: {str(e)}")
             result.errors.append(f"Parse error: {str(e)}")
 
+        logger.debug(f"[BLADE_PARSER] Parse completed: {len(result.sections)} sections, {len(result.includes)} includes, {len(result.components)} components, {len(result.variables)} variables")
         return result
 
     def parse_file(self, file_path: str) -> BladeParseResult:
@@ -467,11 +473,15 @@ class BladeParser:
         Returns:
             BladeParseResult containing parsed information
         """
+        logger.info(f"[BLADE_PARSER] Parsing file: {file_path}")
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
-            return self.parse(content)
+            result = self.parse(content)
+            logger.info(f"[BLADE_PARSER] File parsed successfully: {file_path}")
+            return result
         except Exception as e:
+            logger.error(f"[BLADE_PARSER] Failed to read file {file_path}: {str(e)}")
             result = BladeParseResult()
             result.errors.append(f"Failed to read file: {str(e)}")
             return result
@@ -487,6 +497,7 @@ def parse_blade_file(file_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing parsed Blade structure
     """
+    logger.info(f"[BLADE_PARSER] parse_blade_file called for {file_path}")
     parser = BladeParser()
     result = parser.parse_file(file_path)
     return result.to_dict()
@@ -502,6 +513,7 @@ def parse_blade_content(content: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing parsed Blade structure
     """
+    logger.debug(f"[BLADE_PARSER] parse_blade_content called ({len(content)} bytes)")
     parser = BladeParser()
     result = parser.parse(content)
     return result.to_dict()

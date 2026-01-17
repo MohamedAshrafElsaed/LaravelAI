@@ -3,6 +3,7 @@ Vector store service using Qdrant.
 Handles storage and retrieval of code embeddings.
 """
 import uuid
+import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -12,6 +13,8 @@ from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.core.config import settings
 from app.services.embeddings import get_embedding_dimension
+
+logger = logging.getLogger(__name__)
 
 
 # Default embedding dimension (text-embedding-3-small)
@@ -62,14 +65,17 @@ class VectorStore:
             url: Qdrant URL (defaults to config)
             api_key: Qdrant API key (defaults to config)
         """
+        logger.info(f"[VECTOR_STORE] Initializing VectorStore")
         self.url = url or settings.qdrant_url
         self.api_key = api_key or settings.qdrant_api_key
 
         if not self.url:
+            logger.error(f"[VECTOR_STORE] No Qdrant URL configured")
             raise VectorStoreError(
                 "No Qdrant URL configured. Set QDRANT_URL in your environment."
             )
 
+        logger.info(f"[VECTOR_STORE] Connecting to Qdrant at {self.url}")
         # Initialize client
         try:
             self.client = QdrantClient(
@@ -77,7 +83,9 @@ class VectorStore:
                 api_key=self.api_key if self.api_key else None,
                 timeout=60.0,
             )
+            logger.info(f"[VECTOR_STORE] Connected to Qdrant successfully")
         except Exception as e:
+            logger.error(f"[VECTOR_STORE] Failed to connect to Qdrant: {str(e)}")
             raise VectorStoreError(f"Failed to connect to Qdrant: {str(e)}")
 
     def _get_collection_name(self, project_id: str) -> str:
@@ -113,16 +121,20 @@ class VectorStore:
             True if collection was created/exists
         """
         collection_name = self._get_collection_name(project_id)
+        logger.info(f"[VECTOR_STORE] Creating collection {collection_name}, dimension={dimension}, recreate={recreate}")
 
         try:
             # Check if collection exists
             if self.collection_exists(project_id):
                 if recreate:
+                    logger.info(f"[VECTOR_STORE] Collection exists, recreating")
                     self.delete_collection(project_id)
                 else:
+                    logger.info(f"[VECTOR_STORE] Collection already exists")
                     return True
 
             # Create collection with optimized settings for code search
+            logger.info(f"[VECTOR_STORE] Creating new collection {collection_name}")
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=models.VectorParams(
@@ -161,9 +173,11 @@ class VectorStore:
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
+            logger.info(f"[VECTOR_STORE] Collection {collection_name} created successfully")
             return True
 
         except Exception as e:
+            logger.error(f"[VECTOR_STORE] Failed to create collection: {str(e)}")
             raise VectorStoreError(f"Failed to create collection: {str(e)}")
 
     def delete_collection(self, project_id: str) -> bool:
@@ -207,10 +221,14 @@ class VectorStore:
         Returns:
             Number of points stored
         """
+        logger.info(f"[VECTOR_STORE] store_chunks called: {len(chunks)} chunks, laravel_type={laravel_type}")
+
         if not chunks or not embeddings:
+            logger.warning(f"[VECTOR_STORE] No chunks or embeddings to store")
             return 0
 
         if len(chunks) != len(embeddings):
+            logger.error(f"[VECTOR_STORE] Chunks/embeddings count mismatch: {len(chunks)} vs {len(embeddings)}")
             raise VectorStoreError(
                 f"Chunks ({len(chunks)}) and embeddings ({len(embeddings)}) count mismatch"
             )
@@ -220,6 +238,7 @@ class VectorStore:
         # Ensure collection exists
         if not self.collection_exists(project_id):
             dimension = len(embeddings[0])
+            logger.info(f"[VECTOR_STORE] Collection doesn't exist, creating with dimension={dimension}")
             self.create_collection(project_id, dimension=dimension)
 
         try:
@@ -254,17 +273,24 @@ class VectorStore:
 
             # Upsert in batches
             batch_size = 100
+            total_batches = (len(points) + batch_size - 1) // batch_size
+            logger.info(f"[VECTOR_STORE] Upserting {len(points)} points in {total_batches} batches")
+
             for i in range(0, len(points), batch_size):
                 batch = points[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                logger.debug(f"[VECTOR_STORE] Upserting batch {batch_num}/{total_batches} ({len(batch)} points)")
                 self.client.upsert(
                     collection_name=collection_name,
                     points=batch,
                     wait=True,
                 )
 
+            logger.info(f"[VECTOR_STORE] Successfully stored {len(points)} points in {collection_name}")
             return len(points)
 
         except Exception as e:
+            logger.error(f"[VECTOR_STORE] Failed to store chunks: {str(e)}")
             raise VectorStoreError(f"Failed to store chunks: {str(e)}")
 
     def search(
