@@ -362,8 +362,8 @@ export function ChangesReview({
       <div className="flex flex-1 overflow-hidden">
         {/* File List */}
         <div className="w-80 border-r border-gray-800 overflow-y-auto">
-          {results.map((result) => (
-            <div key={result.file}>
+          {results.map((result, index) => (
+            <div key={`${result.file}-${index}`}>
               <button
                 onClick={() => {
                   setSelectedFile(result.file);
