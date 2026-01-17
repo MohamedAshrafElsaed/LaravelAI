@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Folder,
+  GitPullRequest,
 } from 'lucide-react';
 
 import { projectsApi } from '@/lib/api';
@@ -20,6 +21,7 @@ import { FileTree } from '@/components/FileTree';
 import { Chat } from '@/components/Chat';
 import { CodeViewer } from '@/components/CodeViewer';
 import { ChangesReview } from '@/components/ChangesReview';
+import { GitPanel } from '@/components/GitPanel';
 
 interface Project {
   id: string;
@@ -33,7 +35,7 @@ interface Project {
   error_message: string | null;
 }
 
-type ViewMode = 'chat' | 'code' | 'changes';
+type ViewMode = 'chat' | 'code' | 'changes' | 'git';
 
 export default function ProjectPage() {
   const params = useParams();
@@ -298,6 +300,17 @@ export default function ProjectPage() {
                   </span>
                 </button>
               )}
+              <button
+                onClick={() => setViewMode('git')}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                  viewMode === 'git'
+                    ? 'border-b-2 border-purple-500 text-purple-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <GitPullRequest className="h-4 w-4" />
+                Git
+              </button>
             </div>
 
             {/* View Content */}
@@ -325,6 +338,26 @@ export default function ProjectPage() {
                     setViewMode('chat');
                   }}
                 />
+              )}
+
+              {viewMode === 'git' && (
+                <div className="h-full overflow-y-auto p-4">
+                  <div className="max-w-2xl mx-auto space-y-4">
+                    <div className="text-center mb-6">
+                      <h2 className="text-lg font-semibold text-white">Git Operations</h2>
+                      <p className="text-sm text-gray-400 mt-1">
+                        Manage branches, sync with remote, and create pull requests
+                      </p>
+                    </div>
+                    <GitPanel
+                      projectId={projectId}
+                      defaultBranch={project?.default_branch || 'main'}
+                      onPRCreated={(url) => {
+                        console.log('PR created:', url);
+                      }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </main>

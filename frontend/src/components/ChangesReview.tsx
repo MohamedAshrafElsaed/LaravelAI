@@ -14,8 +14,11 @@ import {
   ChevronRight,
   AlertCircle,
   CheckCircle2,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react';
 import { DiffViewer, DiffStats } from './DiffViewer';
+import { gitApi } from '@/lib/api';
 
 interface ExecutionResult {
   file: string;
@@ -30,16 +33,30 @@ interface ExecutionResult {
 interface ChangesReviewProps {
   results: ExecutionResult[];
   projectId: string;
+  defaultBranch?: string;
   onDiscard: () => void;
+  onPRCreated?: (url: string) => void;
 }
 
-export function ChangesReview({ results, projectId, onDiscard }: ChangesReviewProps) {
+export function ChangesReview({
+  results,
+  projectId,
+  defaultBranch = 'main',
+  onDiscard,
+  onPRCreated,
+}: ChangesReviewProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(
     results.length > 0 ? results[0].file : null
   );
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [applyingAll, setApplyingAll] = useState(false);
   const [creatingPR, setCreatingPR] = useState(false);
+  const [appliedBranch, setAppliedBranch] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showPRForm, setShowPRForm] = useState(false);
+  const [prTitle, setPrTitle] = useState('AI-generated changes');
+  const [prDescription, setPrDescription] = useState('');
 
   const selectedResult = results.find((r) => r.file === selectedFile);
 
@@ -91,26 +108,72 @@ export function ChangesReview({ results, projectId, onDiscard }: ChangesReviewPr
   };
 
   const handleApplyAll = async () => {
+    if (appliedBranch) {
+      // Already applied, show PR form
+      setShowPRForm(true);
+      return;
+    }
+
     setApplyingAll(true);
+    setError(null);
     try {
-      // TODO: Implement apply all changes to repo
-      console.log('Applying all changes...', results);
-      alert('Apply All feature coming soon!');
-    } catch (error) {
-      console.error('Failed to apply changes:', error);
+      // Convert execution results to file changes
+      const changes = results
+        .filter((r) => r.success)
+        .map((r) => ({
+          file: r.file,
+          action: r.action,
+          content: r.content,
+        }));
+
+      if (changes.length === 0) {
+        setError('No successful changes to apply');
+        return;
+      }
+
+      // Apply changes to a new branch
+      const response = await gitApi.applyChanges(projectId, {
+        changes,
+        commit_message: `AI changes: ${changes.length} file(s) modified`,
+        base_branch: defaultBranch,
+      });
+
+      setAppliedBranch(response.data.branch_name);
+      setShowPRForm(true);
+    } catch (err: any) {
+      console.error('Failed to apply changes:', err);
+      setError(err.response?.data?.detail || 'Failed to apply changes');
     } finally {
       setApplyingAll(false);
     }
   };
 
   const handleCreatePR = async () => {
+    if (!appliedBranch) {
+      // Need to apply changes first
+      await handleApplyAll();
+      return;
+    }
+
     setCreatingPR(true);
+    setError(null);
     try {
-      // TODO: Implement PR creation
-      console.log('Creating PR...', results);
-      alert('Create PR feature coming soon!');
-    } catch (error) {
-      console.error('Failed to create PR:', error);
+      const filesChanged = results.filter((r) => r.success).map((r) => r.file);
+
+      const response = await gitApi.createPR(projectId, {
+        branch_name: appliedBranch,
+        title: prTitle,
+        description: prDescription,
+        base_branch: defaultBranch,
+        ai_summary: `Modified ${filesChanged.length} file(s):\n${filesChanged.map(f => `- ${f}`).join('\n')}`,
+      });
+
+      setPrUrl(response.data.url);
+      setShowPRForm(false);
+      onPRCreated?.(response.data.url);
+    } catch (err: any) {
+      console.error('Failed to create PR:', err);
+      setError(err.response?.data?.detail || 'Failed to create pull request');
     } finally {
       setCreatingPR(false);
     }
@@ -142,10 +205,10 @@ export function ChangesReview({ results, projectId, onDiscard }: ChangesReviewPr
   return (
     <div className="flex h-full flex-col bg-gray-950">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-800 px-4 py-3 gap-3">
         <div className="flex items-center gap-4">
           <h2 className="font-semibold text-white">Review Changes</h2>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="text-gray-400">{stats.total} files</span>
             {stats.created > 0 && (
               <span className="text-green-400">+{stats.created} new</span>
@@ -171,33 +234,129 @@ export function ChangesReview({ results, projectId, onDiscard }: ChangesReviewPr
             className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-300 hover:bg-gray-700"
           >
             <Download className="h-4 w-4" />
-            Download
+            <span className="hidden sm:inline">Download</span>
           </button>
           <button
             onClick={onDiscard}
             className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/10"
           >
             <X className="h-4 w-4" />
-            Discard
+            <span className="hidden sm:inline">Discard</span>
           </button>
-          <button
-            onClick={handleCreatePR}
-            disabled={creatingPR || stats.failed > 0}
-            className="flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-          >
-            <GitPullRequest className="h-4 w-4" />
-            {creatingPR ? 'Creating...' : 'Create PR'}
-          </button>
-          <button
-            onClick={handleApplyAll}
-            disabled={applyingAll || stats.failed > 0}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-500 disabled:opacity-50"
-          >
-            <Check className="h-4 w-4" />
-            {applyingAll ? 'Applying...' : 'Apply All'}
-          </button>
+          {!prUrl && (
+            <button
+              onClick={handleApplyAll}
+              disabled={applyingAll || stats.failed === stats.total}
+              className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-500 disabled:opacity-50"
+            >
+              {applyingAll ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              {applyingAll ? 'Applying...' : appliedBranch ? 'Create PR' : 'Apply & Create PR'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* PR URL success message */}
+      {prUrl && (
+        <div className="px-4 py-3 bg-green-500/10 border-b border-green-500/20 flex items-center gap-3 text-sm">
+          <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-green-400 font-medium">Pull Request Created!</p>
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-300 hover:underline truncate block"
+            >
+              {prUrl}
+            </a>
+          </div>
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-500"
+          >
+            <ExternalLink className="h-4 w-4" />
+            View PR
+          </a>
+        </div>
+      )}
+
+      {/* Applied branch info */}
+      {appliedBranch && !prUrl && (
+        <div className="px-4 py-2 bg-purple-500/10 border-b border-purple-500/20 flex items-center gap-2 text-sm text-purple-400">
+          <GitPullRequest className="h-4 w-4" />
+          <span>
+            Changes applied to branch: <strong>{appliedBranch}</strong>
+          </span>
+        </div>
+      )}
+
+      {/* PR Form */}
+      {showPRForm && !prUrl && (
+        <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-800">
+          <div className="max-w-xl space-y-3">
+            <h3 className="text-sm font-medium text-white flex items-center gap-2">
+              <GitPullRequest className="h-4 w-4 text-purple-400" />
+              Create Pull Request
+            </h3>
+            <div>
+              <input
+                type="text"
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+                placeholder="PR title"
+                className="w-full rounded bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+            <div>
+              <textarea
+                value={prDescription}
+                onChange={(e) => setPrDescription(e.target.value)}
+                placeholder="Description (optional)"
+                rows={2}
+                className="w-full rounded bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCreatePR}
+                disabled={creatingPR || !prTitle.trim()}
+                className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+              >
+                {creatingPR ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <GitPullRequest className="h-4 w-4" />
+                )}
+                {creatingPR ? 'Creating...' : 'Create Pull Request'}
+              </button>
+              <button
+                onClick={() => setShowPRForm(false)}
+                className="px-4 py-2 text-sm text-gray-400 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">

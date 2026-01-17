@@ -97,4 +97,51 @@ export const chatApi = {
   getChatUrl: (projectId: string) => `${API_URL}/projects/${projectId}/chat`,
 };
 
+export interface FileChange {
+  file: string;
+  action: 'create' | 'modify' | 'delete';
+  content?: string;
+}
+
+export interface ApplyChangesRequest {
+  changes: FileChange[];
+  branch_name?: string;
+  commit_message: string;
+  base_branch?: string;
+}
+
+export interface CreatePRRequest {
+  branch_name: string;
+  title: string;
+  description?: string;
+  base_branch?: string;
+  ai_summary?: string;
+}
+
+export const gitApi = {
+  // List all branches
+  listBranches: (projectId: string) =>
+    api.get(`/projects/${projectId}/branches`),
+
+  // Apply changes to new branch
+  applyChanges: (projectId: string, data: ApplyChangesRequest) =>
+    api.post(`/projects/${projectId}/apply`, data),
+
+  // Create pull request
+  createPR: (projectId: string, data: CreatePRRequest) =>
+    api.post(`/projects/${projectId}/pr`, data),
+
+  // Sync with remote (pull latest)
+  sync: (projectId: string) =>
+    api.post(`/projects/${projectId}/sync`),
+
+  // Reset to remote
+  reset: (projectId: string, branch?: string) =>
+    api.post(`/projects/${projectId}/reset`, null, { params: { branch } }),
+
+  // Get diff
+  getDiff: (projectId: string, baseBranch?: string) =>
+    api.get(`/projects/${projectId}/diff`, { params: { base_branch: baseBranch } }),
+};
+
 export default api;
