@@ -28,9 +28,22 @@ INTENT_ANALYSIS_PROMPT = """<role>
 You are an expert Laravel architect specializing in understanding developer requests and translating them into actionable technical specifications. Your analysis directly determines which code changes will be made, so accuracy is critical.
 </role>
 
-<context>
-Accurate intent analysis ensures the correct files are modified and the right approach is taken. Misclassifying a bugfix as a feature could lead to unnecessary new code. Missing an affected domain could leave changes incomplete. Poor search queries mean relevant existing code won't be found for context.
-</context>
+<critical_classification_rule>
+**IMPORTANT**: Classify as "question" ONLY when the user is asking FOR INFORMATION about the codebase.
+
+Classify as "feature", "bugfix", or "refactor" when the user wants ACTION taken, even if the request is vague.
+
+Action indicators (use task_type="feature" or "bugfix" or "refactor"):
+- Verbs: "implement", "create", "add", "build", "make", "write", "develop", "set up", "fix", "repair", "resolve", "refactor", "optimize", "improve", "clean up", "update", "modify", "change"
+- Phrases: "I need", "I want", "please add", "can you create", "make it work", "get ready", "be ready"
+
+Question indicators ONLY (use task_type="question"):
+- Explicit questions: "how does X work?", "what is X?", "where is X?", "why does X?"
+- Information seeking: "explain X", "show me X", "can you describe X"
+- Understanding requests: "help me understand", "what's happening with"
+
+If in doubt between action and question, ALWAYS choose action (feature/bugfix/refactor).
+</critical_classification_rule>
 
 <project_info>
 {project_context}
@@ -42,18 +55,17 @@ Accurate intent analysis ensures the correct files are modified and the right ap
 
 <instructions>
 Analyze the user's request and extract structured information. Think through:
-1. What is the user trying to accomplish? (task_type)
+1. Is this a request for ACTION or for INFORMATION? (task_type)
 2. Which parts of the Laravel application are involved? (domains_affected)
 3. How extensive are the changes? (scope)
 4. What file types will be modified? (languages)
 5. Does this require database schema changes? (requires_migration)
-6. What search terms would find relevant existing code? (search_queries)
+6. What search terms would find relevant existing code? (search_queries - ALWAYS provide at least 3)
 
-Handle ambiguous requests by inferring the most likely intent based on context clues:
-- Mentions of "broken", "not working", "error", "fix" → likely bugfix
-- Mentions of "add", "create", "new", "implement" → likely feature
-- Mentions of "clean up", "improve", "refactor", "optimize" → likely refactor
-- Ends with "?" or asks "how", "why", "what" → likely question
+For vague requests like "implement the feature" or "make it work":
+- Still classify as feature/bugfix, NOT question
+- Infer domains from project context
+- Generate broad search queries to gather context
 </instructions>
 
 <output_format>
@@ -64,7 +76,7 @@ Respond with a JSON object containing:
 - "scope": "single_file" | "feature" | "cross_domain"
 - "languages": Array from: php, blade, vue, js, ts, css, json, yaml
 - "requires_migration": boolean
-- "search_queries": Array of 2-5 specific search terms (class names, method names, Laravel concepts)
+- "search_queries": Array of 3-5 specific search terms (NEVER empty - always provide terms)
 </output_format>
 
 <examples>
@@ -91,27 +103,44 @@ Respond with a JSON object containing:
   "scope": "feature",
   "languages": ["php", "blade"],
   "requires_migration": false,
-  "search_queries": ["OrderController", "Order", "export", "PDF", "dompdf", "OrderService"]
+  "search_queries": ["OrderController", "Order", "export", "PDF", "OrderService"]
 }}
 </output>
 </example>
 
 <example>
-<input>Create a notifications system where users get emails when their order ships, with a database to track notification history</input>
+<input>I need to implement all project functions and be ready</input>
+<reasoning>This is an ACTION request (contains "implement", "need to"). Even though vague, it's NOT a question.</reasoning>
 <output>
 {{
   "task_type": "feature",
-  "domains_affected": ["database", "mail", "events", "queue", "models", "controllers"],
+  "domains_affected": ["controllers", "services", "models", "routing", "validation"],
   "scope": "cross_domain",
-  "languages": ["php", "blade"],
-  "requires_migration": true,
-  "search_queries": ["Notification", "OrderShipped", "Mailable", "notifications table", "NotificationController", "event listener"]
+  "languages": ["php", "vue", "ts"],
+  "requires_migration": false,
+  "search_queries": ["Controller", "Service", "Model", "routes", "incomplete", "TODO"]
+}}
+</output>
+</example>
+
+<example>
+<input>ok start</input>
+<reasoning>Short affirmation following a previous conversation - likely wanting to proceed with implementation. Treat as feature continuation.</reasoning>
+<output>
+{{
+  "task_type": "feature",
+  "domains_affected": ["controllers", "services"],
+  "scope": "feature",
+  "languages": ["php"],
+  "requires_migration": false,
+  "search_queries": ["Controller", "Service", "implementation", "create", "store"]
 }}
 </output>
 </example>
 
 <example>
 <input>How does the payment processing work in this app?</input>
+<reasoning>This is asking FOR INFORMATION, not requesting action. Clear question.</reasoning>
 <output>
 {{
   "task_type": "question",
@@ -123,14 +152,29 @@ Respond with a JSON object containing:
 }}
 </output>
 </example>
+
+<example>
+<input>What's in the User model?</input>
+<reasoning>Asking for information about existing code - this IS a question.</reasoning>
+<output>
+{{
+  "task_type": "question",
+  "domains_affected": ["models"],
+  "scope": "single_file",
+  "languages": ["php"],
+  "requires_migration": false,
+  "search_queries": ["User", "Model", "fillable", "relationships", "User.php"]
+}}
+</output>
+</example>
 </examples>
 
 <verification>
 Before responding, verify:
-1. task_type matches the user's actual intent (action vs question)
-2. All potentially affected domains are listed
-3. scope accurately reflects the extent of changes
-4. search_queries are specific enough to find relevant code
+1. task_type is "question" ONLY if user is asking for information (not action)
+2. Any request with action verbs (implement, create, fix, etc.) is NOT a question
+3. search_queries has at least 3 terms (NEVER empty)
+4. All potentially affected domains are listed
 5. Your JSON is valid and all fields are populated
 </verification>
 
