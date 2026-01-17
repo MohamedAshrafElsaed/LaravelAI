@@ -20,9 +20,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add 'cloning' value to projectstatus enum
-    op.execute("ALTER TYPE projectstatus ADD VALUE IF NOT EXISTS 'cloning' AFTER 'pending'")
+    # Must be outside transaction for PostgreSQL enum changes
+    op.execute("COMMIT")
+    op.execute("ALTER TYPE projectstatus ADD VALUE IF NOT EXISTS 'cloning'")
 
-    # Add name column to projects (not null with default from repo_full_name)
+    # Add name column to projects (nullable first)
     op.add_column(
         "projects",
         sa.Column("name", sa.String(255), nullable=True),
