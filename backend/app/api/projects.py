@@ -205,6 +205,133 @@ async def clone_and_index_project_task(
             await indexer.index_project(project_id)
             logger.info(f"[CLONE_INDEX_TASK] Indexing completed successfully for {project_id}")
 
+            # ========== PHASE 3: SCAN (Stack Detection, Health Check, AI Context) ==========
+            logger.info(f"[CLONE_INDEX_TASK] Phase 3: Starting project scan for {project_id}")
+
+            # Re-fetch project to get updated state after indexing
+            stmt = select(Project).where(Project.id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if project and project.clone_path:
+                # Update status to scanning
+                project.status = ProjectStatus.SCANNING.value
+                project.scan_progress = 0
+                project.scan_message = "Starting scan..."
+                await db.commit()
+
+                # 3.1: Stack Detection
+                logger.info(f"[CLONE_INDEX_TASK] Phase 3.1: Stack detection")
+                project.scan_progress = 5
+                project.scan_message = "Detecting technology stack..."
+                await db.commit()
+
+                stack_detector = StackDetector(project.clone_path)
+                stack = stack_detector.detect()
+                project.stack = stack
+                project.scan_progress = 15
+                await db.commit()
+
+                # Extract Laravel/PHP version from stack
+                backend = stack.get("backend", {})
+                if backend.get("framework") == "laravel":
+                    project.laravel_version = backend.get("version")
+                    project.php_version = backend.get("php_version")
+
+                logger.info(f"[CLONE_INDEX_TASK] Stack detected: {backend.get('framework', 'unknown')}")
+
+                # 3.2: File Scanning
+                logger.info(f"[CLONE_INDEX_TASK] Phase 3.2: File scanning")
+                project.scan_progress = 20
+                project.scan_message = "Scanning files..."
+                await db.commit()
+
+                file_scanner = FileScanner(project.clone_path)
+                file_stats = file_scanner.scan()
+                project.file_stats = file_stats
+
+                # Get structure analysis
+                structure = file_scanner.get_structure_analysis()
+                project.structure = structure
+
+                project.scan_progress = 50
+                project.scan_message = f"Scanned {file_stats.get('total_files', 0)} files"
+                await db.commit()
+
+                logger.info(f"[CLONE_INDEX_TASK] File scan complete: {file_stats.get('total_files', 0)} files")
+
+                # 3.3: Health Check
+                logger.info(f"[CLONE_INDEX_TASK] Phase 3.3: Health check")
+                project.status = ProjectStatus.ANALYZING.value
+                project.scan_progress = 60
+                project.scan_message = "Running health checks..."
+                await db.commit()
+
+                health_checker = HealthChecker(project.clone_path, stack, file_stats)
+                health_result = health_checker.check()
+
+                project.health_score = health_result.get("score")
+                project.health_check = health_result
+                project.scan_progress = 75
+                await db.commit()
+
+                logger.info(f"[CLONE_INDEX_TASK] Health check complete: score={health_result.get('score')}")
+
+                # 3.4: Save Issues
+                logger.info(f"[CLONE_INDEX_TASK] Phase 3.4: Saving issues")
+                project.scan_progress = 80
+                project.scan_message = "Saving issues..."
+                await db.commit()
+
+                # Delete existing issues
+                from sqlalchemy import delete
+                await db.execute(
+                    delete(ProjectIssue).where(ProjectIssue.project_id == project_id)
+                )
+
+                # Save new issues
+                issues = health_checker.get_issues()
+                for issue in issues:
+                    db_issue = ProjectIssue(
+                        project_id=project_id,
+                        category=issue.category,
+                        severity=issue.severity.value,
+                        title=issue.title,
+                        description=issue.description,
+                        file_path=issue.file_path,
+                        line_number=issue.line_number,
+                        suggestion=issue.suggestion,
+                        auto_fixable=issue.auto_fixable,
+                    )
+                    db.add(db_issue)
+
+                await db.commit()
+                logger.info(f"[CLONE_INDEX_TASK] Saved {len(issues)} issues")
+
+                # 3.5: Generate AI Context
+                logger.info(f"[CLONE_INDEX_TASK] Phase 3.5: Generating AI context")
+                project.scan_progress = 90
+                project.scan_message = "Generating AI context..."
+                await db.commit()
+
+                ai_generator = AIContextGenerator(project.clone_path, stack, file_stats, structure)
+                ai_context = ai_generator.generate()
+                project.ai_context = ai_context
+                project.scan_progress = 95
+                await db.commit()
+
+                logger.info(f"[CLONE_INDEX_TASK] AI context generated")
+
+                # Complete
+                project.scan_progress = 100
+                project.scan_message = "Scan complete"
+                project.scanned_at = datetime.utcnow()
+                project.status = ProjectStatus.READY.value
+                project.error_message = None
+                await db.commit()
+
+                logger.info(f"[CLONE_INDEX_TASK] Scan completed for project_id={project_id}")
+
         except GitServiceError as e:
             logger.error(f"[CLONE_INDEX_TASK] Git service error for project {project_id}: {str(e)}")
             # Update project with error
