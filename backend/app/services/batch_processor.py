@@ -19,6 +19,20 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Import operations logger (lazy to avoid circular imports)
+_ops_logger = None
+
+def _get_ops_logger():
+    """Lazy load operations logger."""
+    global _ops_logger
+    if _ops_logger is None:
+        try:
+            from app.services.ai_operations_logger import get_operations_logger
+            _ops_logger = get_operations_logger()
+        except ImportError:
+            pass
+    return _ops_logger
+
 
 class BatchStatus(str, Enum):
     """Status of a batch processing job."""
@@ -270,6 +284,15 @@ class BatchProcessor:
 
             logger.info(f"[BATCH_PROCESSOR] Batch {job_id} submitted successfully, Anthropic batch ID: {message_batch.id}")
 
+            # Log to operations logger
+            ops_logger = _get_ops_logger()
+            if ops_logger:
+                ops_logger.log_batch_operation(
+                    operation="submitted",
+                    batch_id=job_id,
+                    total_requests=len(requests),
+                )
+
             await self._notify_progress(job)
             return job
 
@@ -361,6 +384,17 @@ class BatchProcessor:
                         f"{job.completed_requests} succeeded, {job.failed_requests} failed, "
                         f"{job.total_tokens} tokens, ${job.total_cost:.4f}"
                     )
+
+                    # Log to operations logger
+                    ops_logger = _get_ops_logger()
+                    if ops_logger:
+                        ops_logger.log_batch_operation(
+                            operation="completed",
+                            batch_id=job.id,
+                            total_requests=job.total_requests,
+                            completed=job.completed_requests,
+                            failed=job.failed_requests,
+                        )
 
                     await self._notify_progress(job)
                     return job

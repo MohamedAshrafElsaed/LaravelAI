@@ -20,6 +20,20 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Import operations logger (lazy to avoid circular imports)
+_ops_logger = None
+
+def _get_ops_logger():
+    """Lazy load operations logger."""
+    global _ops_logger
+    if _ops_logger is None:
+        try:
+            from app.services.ai_operations_logger import get_operations_logger
+            _ops_logger = get_operations_logger()
+        except ImportError:
+            pass
+    return _ops_logger
+
 
 class CacheType(str, Enum):
     """Types of cacheable content."""
@@ -334,6 +348,34 @@ class PromptCacheService:
                 f"cache_creation={cache_creation}, cache_read={cache_read}, "
                 f"latency={latency_ms}ms, cost_saved=${cost_savings:.6f}"
             )
+
+            # Log to operations logger
+            ops_logger = _get_ops_logger()
+            if ops_logger:
+                if cache_hit:
+                    ops_logger.log_cache_hit(
+                        tokens_saved=cache_read,
+                        cost_saved=cost_savings,
+                    )
+                else:
+                    ops_logger.log_cache_miss()
+
+                # Calculate cost
+                input_cost = (input_tokens / 1_000_000) * 3
+                output_cost = (output_tokens / 1_000_000) * 15
+                total_cost = input_cost + output_cost
+
+                ops_logger.log_api_call(
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=total_cost,
+                    duration_ms=latency_ms,
+                    cache_hit=cache_hit,
+                    cache_tokens_saved=cache_read if cache_hit else 0,
+                    cache_cost_saved=cost_savings,
+                    request_type="chat_with_cache",
+                )
 
             return CachedPromptResponse(
                 content=content,

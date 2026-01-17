@@ -29,8 +29,12 @@ from app.services.conversation_logger import (
     finalize_conversation_logger,
     ConversationLogger,
 )
+from app.services.ai_operations_logger import get_operations_logger, OperationType
 
 logger = logging.getLogger(__name__)
+
+# Get operations logger for tracking all AI operations
+_ops_logger = get_operations_logger()
 
 router = APIRouter()
 
@@ -299,6 +303,13 @@ async def stream_chat_response(
     """
     logger.info(f"[CHAT] Starting stream for project={project_id}, conversation={conversation_id}")
 
+    # Start AI operations session for logging
+    ops_session_id = _ops_logger.start_chat_session(
+        user_id=user_id,
+        project_id=project_id,
+        conversation_id=conversation_id,
+    )
+
     # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
 
@@ -494,6 +505,9 @@ Answer the question based on this project's specific technology stack, conventio
         log_paths = finalize_conversation_logger(conversation.id)
         logger.info(f"[CHAT] Conversation log finalized: {log_paths}")
 
+        # End AI operations session and get summary
+        ops_summary = _ops_logger.end_chat_session(ops_session_id)
+
         # Send final complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": result.success,
@@ -503,10 +517,22 @@ Answer the question based on this project's specific technology stack, conventio
             "validation": result.validation.to_dict() if result.validation else None,
             "error": result.error,
             "log_paths": log_paths,  # Include log file paths in response
+            "ops_summary": ops_summary,  # Include AI operations summary
         })
 
     except Exception as e:
         logger.exception(f"[CHAT] Stream error: {e}")
+        # Log error to operations logger
+        _ops_logger.log(
+            operation_type=OperationType.ERROR,
+            message=f"Stream error: {str(e)}",
+            user_id=user_id,
+            project_id=project_id,
+            success=False,
+            error=str(e),
+        )
+        # End AI operations session
+        _ops_logger.end_chat_session(ops_session_id)
         # Log error
         conv_logger.log_error(
             error_message=str(e),
@@ -593,6 +619,13 @@ async def stream_question_response(
     Uses the orchestrator to get context, then streams Claude's response.
     """
     logger.info(f"[CHAT] Answering question for project={project_id}")
+
+    # Start AI operations session for logging
+    ops_session_id = _ops_logger.start_chat_session(
+        user_id=user_id,
+        project_id=project_id,
+        conversation_id=conversation_id,
+    )
 
     # Get or create conversation
     conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
@@ -708,15 +741,30 @@ Answer the question based on this project's specific technology stack, conventio
         log_paths = finalize_conversation_logger(conversation.id)
         logger.info(f"[CHAT] Question conversation log finalized: {log_paths}")
 
+        # End AI operations session and get summary
+        ops_summary = _ops_logger.end_chat_session(ops_session_id)
+
         # Send complete event
         yield create_sse_event(EventType.COMPLETE, {
             "success": True,
             "answer": full_response,
             "log_paths": log_paths,  # Include log file paths in response
+            "ops_summary": ops_summary,  # Include AI operations summary
         })
 
     except Exception as e:
         logger.exception(f"[CHAT] Question stream error: {e}")
+        # Log error to operations logger
+        _ops_logger.log(
+            operation_type=OperationType.ERROR,
+            message=f"Question stream error: {str(e)}",
+            user_id=user_id,
+            project_id=project_id,
+            success=False,
+            error=str(e),
+        )
+        # End AI operations session
+        _ops_logger.end_chat_session(ops_session_id)
         # Log error
         conv_logger.log_error(
             error_message=str(e),
@@ -1140,6 +1188,13 @@ async def chat_sync(
         db, current_user.id, project_id, request.conversation_id
     )
 
+    # Start AI operations session for logging
+    ops_session_id = _ops_logger.start_chat_session(
+        user_id=str(current_user.id),
+        project_id=project_id,
+        conversation_id=conversation.id,
+    )
+
     # Initialize conversation logger
     conv_logger = get_conversation_logger(
         conversation_id=conversation.id,
@@ -1211,6 +1266,9 @@ Answer based on this project's specific technology stack, conventions, and patte
                 is_streaming=False,
             )
             finalize_conversation_logger(conversation.id)
+
+            # End AI operations session
+            _ops_logger.end_chat_session(ops_session_id)
 
             return ChatResponse(
                 conversation_id=conversation.id,
@@ -1293,6 +1351,9 @@ Answer based on this project's specific technology stack, conventions, and patte
             )
             finalize_conversation_logger(conversation.id)
 
+            # End AI operations session
+            _ops_logger.end_chat_session(ops_session_id)
+
             return ChatResponse(
                 conversation_id=conversation.id,
                 message=ChatMessageResponse(
@@ -1307,6 +1368,17 @@ Answer based on this project's specific technology stack, conventions, and patte
 
     except Exception as e:
         logger.exception(f"[CHAT] Sync chat error: {e}")
+        # Log error to operations logger
+        _ops_logger.log(
+            operation_type=OperationType.ERROR,
+            message=f"Sync chat error: {str(e)}",
+            user_id=str(current_user.id),
+            project_id=project_id,
+            success=False,
+            error=str(e),
+        )
+        # End AI operations session
+        _ops_logger.end_chat_session(ops_session_id)
         # Log error and finalize
         conv_logger.log_error(
             error_message=str(e),
@@ -1316,4 +1388,174 @@ Answer based on this project's specific technology stack, conventions, and patte
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
+        )
+
+
+# ============== AI Operations Logs Endpoints ==============
+
+@router.get("/operations/stats")
+async def get_operations_stats(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get global AI operations statistics.
+
+    Returns aggregated stats across all sessions:
+    - Total operations count
+    - Total API calls
+    - Total tokens used
+    - Total cost
+    - Cache hit statistics
+    - Cost saved through caching
+    """
+    logger.info(f"[CHAT] GET /operations/stats - user_id={current_user.id}")
+
+    stats = _ops_logger.get_global_stats()
+
+    return {
+        "success": True,
+        "stats": stats,
+    }
+
+
+@router.get("/operations/recent")
+async def get_recent_operations(
+    limit: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get recent AI operations across all sessions.
+
+    Returns the most recent operations with full details.
+    Useful for debugging and monitoring AI usage.
+    """
+    logger.info(f"[CHAT] GET /operations/recent - user_id={current_user.id}")
+
+    operations = _ops_logger.get_recent_operations(limit=limit)
+
+    return {
+        "success": True,
+        "count": len(operations),
+        "operations": operations,
+    }
+
+
+@router.get("/operations/session/{session_id}")
+async def get_session_operations(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get operations for a specific AI session.
+
+    Returns all operations logged during the session with summary statistics.
+    """
+    logger.info(f"[CHAT] GET /operations/session/{session_id} - user_id={current_user.id}")
+
+    session = _ops_logger.get_session(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    return {
+        "success": True,
+        "session": session.to_dict(),
+    }
+
+
+@router.get("/operations/logs/{date}")
+async def get_operations_logs_by_date(
+    date: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get saved operation logs for a specific date.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        List of available log files for the date
+    """
+    from pathlib import Path
+
+    logger.info(f"[CHAT] GET /operations/logs/{date} - user_id={current_user.id}")
+
+    log_dir = Path("/tmp/laravelai_ops_logs") / date
+
+    if not log_dir.exists():
+        return {
+            "success": True,
+            "message": f"No logs found for date {date}",
+            "logs": [],
+        }
+
+    # List all log files
+    logs = []
+    for log_file in log_dir.glob("*.json"):
+        try:
+            import json
+            with open(log_file, "r") as f:
+                data = json.load(f)
+                logs.append({
+                    "filename": log_file.name,
+                    "session_id": data.get("session_id"),
+                    "user_id": data.get("user_id"),
+                    "project_id": data.get("project_id"),
+                    "started_at": data.get("started_at"),
+                    "total_operations": data.get("total_operations"),
+                    "total_cost": data.get("total_cost"),
+                    "cache_stats": data.get("cache_stats"),
+                })
+        except Exception as e:
+            logger.error(f"[CHAT] Error reading log file {log_file}: {e}")
+
+    return {
+        "success": True,
+        "date": date,
+        "count": len(logs),
+        "logs": logs,
+    }
+
+
+@router.get("/operations/logs/{date}/{session_id}")
+async def get_operations_log_detail(
+    date: str,
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed operations log for a specific session.
+
+    Returns the full session log with all operations.
+    """
+    from pathlib import Path
+    import json
+
+    logger.info(f"[CHAT] GET /operations/logs/{date}/{session_id} - user_id={current_user.id}")
+
+    log_file = Path("/tmp/laravelai_ops_logs") / date / f"session_{session_id}.json"
+
+    if not log_file.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log file not found for session {session_id} on {date}",
+        )
+
+    try:
+        with open(log_file, "r") as f:
+            data = json.load(f)
+
+        return {
+            "success": True,
+            "session": data,
+        }
+    except Exception as e:
+        logger.error(f"[CHAT] Error reading log file {log_file}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error reading log file: {str(e)}",
         )

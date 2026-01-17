@@ -20,6 +20,20 @@ from app.services.prompt_cache import PromptCacheService, get_prompt_cache_servi
 
 logger = logging.getLogger(__name__)
 
+# Import operations logger (lazy to avoid circular imports)
+_ops_logger = None
+
+def _get_ops_logger():
+    """Lazy load operations logger."""
+    global _ops_logger
+    if _ops_logger is None:
+        try:
+            from app.services.ai_operations_logger import get_operations_logger
+            _ops_logger = get_operations_logger()
+        except ImportError:
+            pass
+    return _ops_logger
+
 
 class SubagentType(str, Enum):
     """Types of specialized subagents."""
@@ -354,6 +368,14 @@ class Subagent:
         logger.info(f"[SUBAGENT:{self.config.agent_type.value}] Executing task")
         start_time = time.time()
 
+        # Log subagent start
+        ops_logger = _get_ops_logger()
+        if ops_logger:
+            ops_logger.log_subagent(
+                agent_type=self.config.agent_type.value,
+                action="start",
+            )
+
         try:
             # Build the user message
             user_content = f"Task: {task}"
@@ -374,11 +396,23 @@ class Subagent:
                     temperature=self.config.temperature,
                 )
 
+                total_tokens = response.input_tokens + response.output_tokens
+
+                # Log subagent completion
+                if ops_logger:
+                    ops_logger.log_subagent(
+                        agent_type=self.config.agent_type.value,
+                        action="end",
+                        tokens=total_tokens,
+                        duration_ms=response.latency_ms,
+                        cache_hit=response.cache_hit,
+                    )
+
                 return SubagentResult(
                     success=True,
                     subagent_type=self.config.agent_type,
                     content=response.content,
-                    tokens_used=response.input_tokens + response.output_tokens,
+                    tokens_used=total_tokens,
                     latency_ms=response.latency_ms,
                     cache_hit=response.cache_hit,
                     metadata={

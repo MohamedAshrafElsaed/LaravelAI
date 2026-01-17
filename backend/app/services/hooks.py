@@ -15,6 +15,20 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+# Import operations logger (lazy to avoid circular imports)
+_ops_logger = None
+
+def _get_ops_logger():
+    """Lazy load operations logger."""
+    global _ops_logger
+    if _ops_logger is None:
+        try:
+            from app.services.ai_operations_logger import get_operations_logger
+            _ops_logger = get_operations_logger()
+        except ImportError:
+            pass
+    return _ops_logger
+
 
 class HookEvent(str, Enum):
     """Events that can trigger hooks."""
@@ -561,6 +575,19 @@ class HooksManager:
             details={"hooks_run": len(enabled_hooks), "reasons": reasons},
             duration_ms=total_duration,
         )
+
+        # Log to operations logger
+        ops_logger = _get_ops_logger()
+        if ops_logger:
+            hook_name = enabled_hooks[0].name if enabled_hooks else "unknown"
+            ops_logger.log_hook_decision(
+                hook_name=hook_name,
+                event=event.value,
+                decision=final_decision.value,
+                reason="; ".join(reasons) if reasons else None,
+                user_id=user_id,
+                project_id=project_id,
+            )
 
         return HookResult(
             decision=final_decision,
