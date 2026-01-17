@@ -334,9 +334,12 @@ def map_phase_to_sse_event(event: ProcessEvent) -> Optional[str]:
     elif phase == ProcessPhase.EXECUTING:
         step_data = event.data or {}
         if "step" in step_data:
-            # Check if this is start or completion
-            # For now, send step_started for each step event
-            return create_sse_event(EventType.STEP_STARTED, data)
+            # Check step_status to determine if started or completed
+            step_status = step_data.get("step_status", "started")
+            if step_status == "completed":
+                return create_sse_event(EventType.STEP_COMPLETED, data)
+            else:
+                return create_sse_event(EventType.STEP_STARTED, data)
         return None
 
     elif phase == ProcessPhase.VALIDATING:

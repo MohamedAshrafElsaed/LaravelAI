@@ -262,13 +262,20 @@ Indexed Files: {project.indexed_files_count}
             total_steps = len(plan.steps)
 
             for i, step in enumerate(plan.steps):
-                progress = 0.4 + (0.4 * (i / total_steps))
+                step_progress_start = 0.4 + (0.4 * (i / total_steps))
+                step_progress_end = 0.4 + (0.4 * ((i + 1) / total_steps))
 
+                # Emit step_started event
                 event = await self._emit_event(
                     ProcessPhase.EXECUTING,
                     f"Executing step {step.order}/{total_steps}: {step.description[:50]}...",
-                    progress,
-                    {"step": step.to_dict()},
+                    step_progress_start,
+                    {
+                        "step": step.to_dict(),
+                        "step_status": "started",
+                        "step_index": i,
+                        "total_steps": total_steps,
+                    },
                 )
                 result.events.append(event)
 
@@ -285,6 +292,21 @@ Indexed Files: {project.indexed_files_count}
                 )
 
                 execution_results.append(exec_result)
+
+                # Emit step_completed event with result data
+                event = await self._emit_event(
+                    ProcessPhase.EXECUTING,
+                    f"Step {step.order}/{total_steps} {'completed' if exec_result.success else 'failed'}: {step.file}",
+                    step_progress_end,
+                    {
+                        "step": step.to_dict(),
+                        "step_status": "completed",
+                        "step_index": i,
+                        "total_steps": total_steps,
+                        "result": exec_result.to_dict(),
+                    },
+                )
+                result.events.append(event)
 
                 if not exec_result.success:
                     logger.warning(f"[ORCHESTRATOR] Step {step.order} failed: {exec_result.error}")
