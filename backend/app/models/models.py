@@ -231,6 +231,10 @@ class Message(Base):
     code_changes: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # e.g., {"files": [{"path": "...", "diff": "...", "action": "modify"}]}
 
+    # Full processing data for history replay (intent, plan, steps, validation, events)
+    processing_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # e.g., {"intent": {...}, "plan": {...}, "events": [...], "validation": {...}}
+
     # Token usage tracking
     tokens_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 

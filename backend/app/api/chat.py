@@ -36,6 +36,7 @@ class ChatMessageResponse(BaseModel):
     role: str  # user, assistant, system
     content: str
     code_changes: Optional[dict] = None
+    processing_data: Optional[dict] = None  # Full processing history (intent, plan, steps, etc.)
     created_at: datetime
 
     class Config:
@@ -169,6 +170,7 @@ async def save_message(
     content: str,
     code_changes: Optional[dict] = None,
     tokens_used: Optional[int] = None,
+    processing_data: Optional[dict] = None,
 ) -> Message:
     """Save a message to the database."""
     message = Message(
@@ -177,6 +179,7 @@ async def save_message(
         content=content,
         code_changes=code_changes,
         tokens_used=tokens_used,
+        processing_data=processing_data,
     )
     db.add(message)
     await db.commit()
@@ -274,15 +277,32 @@ async def stream_chat_response(
                 summary_parts.append(f"\n**Validation score:** {result.validation.score}/100")
             response_content = "\n".join(summary_parts) if summary_parts else "Task completed successfully."
         else:
-            response_content = f"Failed to process request: {result.error}"
+            # Build meaningful error message
+            error_msg = result.error
+            if not error_msg and result.validation and result.validation.errors:
+                error_msg = "; ".join([e.message for e in result.validation.errors[:3]])
+            if not error_msg:
+                error_msg = "Unknown error occurred during processing"
+            response_content = f"Failed to process request: {error_msg}"
 
-        # Save assistant message
+        # Save assistant message with full processing data
         code_changes = {
             "results": [r.to_dict() for r in result.execution_results],
             "validation": result.validation.to_dict() if result.validation else None,
         } if result.execution_results else None
 
-        await save_message(db, conversation.id, "assistant", response_content, code_changes)
+        # Build processing_data to store all steps for history replay
+        processing_data = {
+            "intent": result.intent.to_dict() if result.intent else None,
+            "plan": result.plan.to_dict() if result.plan else None,
+            "execution_results": [r.to_dict() for r in result.execution_results],
+            "validation": result.validation.to_dict() if result.validation else None,
+            "events": [e.to_dict() for e in result.events],
+            "success": result.success,
+            "error": result.error,
+        }
+
+        await save_message(db, conversation.id, "assistant", response_content, code_changes, processing_data=processing_data)
 
         # Send final complete event
         yield create_sse_event(EventType.COMPLETE, {
@@ -568,6 +588,7 @@ async def get_conversation_messages(
             role=msg.role,
             content=msg.content,
             code_changes=msg.code_changes,
+            processing_data=msg.processing_data,
             created_at=msg.created_at,
         )
         for msg in messages

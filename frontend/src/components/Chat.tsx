@@ -10,11 +10,22 @@ import { useToast } from './Toast';
 import { SkeletonConversationList, SkeletonChatMessages } from './ui/Skeleton';
 import { Button } from './ui/Button';
 
+interface ProcessingData {
+  intent?: any;
+  plan?: any;
+  execution_results?: any[];
+  validation?: any;
+  events?: any[];
+  success?: boolean;
+  error?: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  processing_data?: ProcessingData;
 }
 
 interface Conversation {
@@ -103,6 +114,7 @@ export function Chat({
         role: msg.role,
         content: msg.content,
         timestamp: new Date(msg.created_at),
+        processing_data: msg.processing_data,
       }));
       setMessages(loadedMessages);
       setConversationId(convId);
@@ -564,6 +576,104 @@ export function Chat({
   );
 }
 
+// Processing history display for saved messages
+function ProcessingHistory({ data }: { data: ProcessingData }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!data || (!data.intent && !data.plan && !data.events?.length)) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 border-t border-gray-700 pt-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300"
+      >
+        <span>{expanded ? '▼' : '▶'}</span>
+        <span>Processing Details</span>
+        {data.success !== undefined && (
+          <span className={data.success ? 'text-green-400' : 'text-red-400'}>
+            ({data.success ? 'Success' : 'Failed'})
+          </span>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-2 text-xs">
+          {/* Intent */}
+          {data.intent && (
+            <div className="rounded bg-gray-900 p-2">
+              <div className="font-medium text-blue-400">Intent</div>
+              <div className="text-gray-400">
+                Type: {data.intent.task_type} | Complexity: {data.intent.complexity}
+              </div>
+              {data.intent.summary && (
+                <div className="text-gray-500 mt-1">{data.intent.summary}</div>
+              )}
+            </div>
+          )}
+
+          {/* Plan */}
+          {data.plan && (
+            <div className="rounded bg-gray-900 p-2">
+              <div className="font-medium text-purple-400">Plan</div>
+              <div className="text-gray-400">{data.plan.summary}</div>
+              {data.plan.steps && data.plan.steps.length > 0 && (
+                <ul className="mt-1 space-y-1">
+                  {data.plan.steps.map((step: any, i: number) => (
+                    <li key={i} className="text-gray-500">
+                      {i + 1}. [{step.action}] {step.file}: {step.description?.slice(0, 50)}...
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Execution Results */}
+          {data.execution_results && data.execution_results.length > 0 && (
+            <div className="rounded bg-gray-900 p-2">
+              <div className="font-medium text-green-400">Execution Results</div>
+              <ul className="mt-1 space-y-1">
+                {data.execution_results.map((result: any, i: number) => (
+                  <li key={i} className={result.success ? 'text-green-500' : 'text-red-500'}>
+                    [{result.action}] {result.file} - {result.success ? 'Success' : 'Failed'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Validation */}
+          {data.validation && (
+            <div className="rounded bg-gray-900 p-2">
+              <div className="font-medium text-yellow-400">Validation</div>
+              <div className="text-gray-400">
+                Score: {data.validation.score}/100 | Approved: {data.validation.approved ? 'Yes' : 'No'}
+              </div>
+              {data.validation.errors && data.validation.errors.length > 0 && (
+                <ul className="mt-1">
+                  {data.validation.errors.slice(0, 3).map((err: any, i: number) => (
+                    <li key={i} className="text-red-400">- {err.message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Error */}
+          {data.error && (
+            <div className="rounded bg-red-900/30 p-2 text-red-400">
+              Error: {data.error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Message bubble component
 function MessageBubble({
   message,
@@ -602,55 +712,61 @@ function MessageBubble({
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div className="prose prose-invert prose-sm max-w-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                // Style code blocks
-                code({ node, className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const isInline = !match;
+          <>
+            <div className="prose prose-invert prose-sm max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  // Style code blocks
+                  code({ node, className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    const isInline = !match;
 
-                  if (isInline) {
+                    if (isInline) {
+                      return (
+                        <code
+                          className="rounded bg-gray-700 px-1 py-0.5 text-sm"
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      );
+                    }
+
                     return (
-                      <code
-                        className="rounded bg-gray-700 px-1 py-0.5 text-sm"
-                        {...props}
+                      <pre className="overflow-x-auto rounded-lg bg-gray-900 p-4">
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      </pre>
+                    );
+                  },
+                  // Style links
+                  a({ children, href }) {
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline"
                       >
                         {children}
-                      </code>
+                      </a>
                     );
-                  }
-
-                  return (
-                    <pre className="overflow-x-auto rounded-lg bg-gray-900 p-4">
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    </pre>
-                  );
-                },
-                // Style links
-                a({ children, href }) {
-                  return (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:underline"
-                    >
-                      {children}
-                    </a>
-                  );
-                },
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-            {isStreaming && (
-              <span className="inline-block h-4 w-2 animate-pulse bg-gray-400 ml-1" />
+                  },
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+              {isStreaming && (
+                <span className="inline-block h-4 w-2 animate-pulse bg-gray-400 ml-1" />
+              )}
+            </div>
+            {/* Show processing history for saved messages */}
+            {message.processing_data && !isStreaming && (
+              <ProcessingHistory data={message.processing_data} />
             )}
-          </div>
+          </>
         )}
       </div>
     </div>
