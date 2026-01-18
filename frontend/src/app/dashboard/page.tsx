@@ -1,46 +1,58 @@
 'use client';
 
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {useRouter} from 'next/navigation';
-import {useAuthStore, useProjectsStore} from '@/lib/store';
-import {githubApi, projectsApi} from '@/lib/api';
-import Sidebar, {Branch, Repo, Session, User} from '@/components/dashboard/Sidebar';
-import WelcomeScreen from '@/components/dashboard/WelcomeScreen';
-import SessionView, {SessionViewRef} from '@/components/dashboard/SessionView';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Menu, RefreshCw } from 'lucide-react';
+import { useAuthStore, useThemeStore } from '@/lib/store';
+import { useDashboard } from '@/hooks/useDashboardData';
+
+// Components
+import DevSidebar from '@/components/dashboard/DevSidebar';
+import ActivityFeed from '@/components/dashboard/ActivityFeed';
+import DataTable from '@/components/dashboard/DataTable';
+import DevChatPanel from '@/components/dashboard/DevChatPanel';
+import DiffPreview from '@/components/dashboard/DiffPreview';
+import DevFileExplorer from '@/components/dashboard/DevFileExplorer';
+import EmptyState from '@/components/dashboard/EmptyState';
+import StatCard from '@/components/dashboard/StatCard';
+import ProjectSelector from '@/components/dashboard/ProjectSelector';
 
 export default function DashboardPage() {
     const router = useRouter();
-    const {isAuthenticated, isHydrated, user: authUser} = useAuthStore();
-    const {projects, selectedProject, setProjects, selectProject} = useProjectsStore();
+    const { isAuthenticated, isHydrated } = useAuthStore();
+    const { theme } = useThemeStore();
 
-    // Refs
-    const chatRef = useRef<SessionViewRef>(null);
+    const [activeTab, setActiveTab] = useState('dashboard');
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
-    // UI State
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [currentView, setCurrentView] = useState<'welcome' | 'session'>('welcome');
-    const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+    // Fetch dashboard data
+    const {
+        projects,
+        selectedProject,
+        stats,
+        changes,
+        activities,
+        health,
+        loading,
+        changesLoading,
+        activitiesLoading,
+        setSelectedProjectId,
+        refetch,
+    } = useDashboard();
 
-    // Data State
-    const [repos, setRepos] = useState<Repo[]>([]);
-    const [branches, setBranches] = useState<Branch[]>([
-        {name: 'main', selected: true},
-        {name: 'develop', selected: false},
-    ]);
-    const [sessions, setSessions] = useState<Session[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
-    // User data with workspaces
-    const [user, setUser] = useState<User>({
-        email: authUser?.email || '',
-        name: authUser?.name || authUser?.username || 'User',
-        workspaces: [
-            {name: 'Personal', plan: 'Free plan', selected: true},
-        ],
-    });
-
-    // Derived state
-    const selectedRepo = useMemo(() => repos.find((r) => r.selected), [repos]);
+    useEffect(() => {
+        if (mounted) {
+            document.documentElement.classList.remove('light', 'dark');
+            document.documentElement.classList.add(theme);
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+    }, [theme, mounted]);
 
     // Auth check
     useEffect(() => {
@@ -49,249 +61,238 @@ export default function DashboardPage() {
         }
     }, [isHydrated, isAuthenticated, router]);
 
-    // Load initial data
-    useEffect(() => {
-        if (isAuthenticated) {
-            loadInitialData();
-        }
-    }, [isAuthenticated]);
+    // Transform git changes to deployments format for DataTable
+    const deployments = changes.map(change => ({
+        id: change.id,
+        project: selectedProject?.name || 'Unknown',
+        branch: change.branch_name,
+        status: mapChangeStatus(change.status),
+        commit: change.commit_hash?.slice(0, 6) || 'pending',
+        age: formatTimeAgo(change.created_at),
+        environment: change.base_branch === 'main' ? 'Production' : 'Preview',
+    }));
 
-    // Update user when auth user changes
-    useEffect(() => {
-        if (authUser) {
-            setUser((prev) => ({
-                ...prev,
-                email: authUser.email || prev.email,
-                name: authUser.name || authUser.username || prev.name,
-            }));
-        }
-    }, [authUser]);
-
-    // Load initial data
-    const loadInitialData = async () => {
-        setIsLoading(true);
-        try {
-            await Promise.all([loadProjects(), loadRepos()]);
-        } catch (err) {
-            console.error('Failed to load initial data:', err);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Load projects
-    const loadProjects = async () => {
-        try {
-            const response = await projectsApi.list();
-            setProjects(response.data);
-        } catch (err) {
-            console.error('Failed to load projects:', err);
-        }
-    };
-
-    // Load GitHub repos
-    const loadRepos = async () => {
-        try {
-            const response = await githubApi.listRepos();
-            const repoList: Repo[] = response.data.map((repo: any, index: number) => ({
-                name: repo.name,
-                owner: repo.owner?.login || repo.full_name?.split('/')[0] || '',
-                selected: index === 0, // Select first repo by default
-            }));
-            setRepos(repoList);
-        } catch (err) {
-            console.error('Failed to load repos:', err);
-        }
-    };
-
-    // Handle repo selection
-    const handleSelectRepo = useCallback((repoName: string) => {
-        setRepos((prev) =>
-            prev.map((r) => ({
-                ...r,
-                selected: r.name === repoName,
-            }))
-        );
-
-        // Find corresponding project
-        const repo = repos.find((r) => r.name === repoName);
-        if (repo) {
-            const project = projects.find(
-                (p) => p.repo_name === repo.name || p.repo_full_name === `${repo.owner}/${repo.name}`
-            );
-            if (project) {
-                selectProject(project);
-            }
-        }
-
-        // Reset session when repo changes
-        setActiveSessionId(null);
-        setCurrentView('welcome');
-    }, [repos, projects, selectProject]);
-
-    // Handle branch selection
-    const handleSelectBranch = useCallback((branchName: string) => {
-        setBranches((prev) =>
-            prev.map((b) => ({
-                ...b,
-                selected: b.name === branchName,
-            }))
-        );
-    }, []);
-
-    // Handle session selection
-    const handleSelectSession = useCallback((sessionId: string) => {
-        setActiveSessionId(sessionId);
-        setCurrentView('session');
-        setSidebarOpen(false); // Close sidebar on mobile
-    }, []);
-
-    // Handle conversation change from chat
-    const handleConversationChange = useCallback((conversationId: string | null) => {
-        setActiveSessionId(conversationId);
-        if (conversationId) {
-            setCurrentView('session');
-        }
-    }, []);
-
-    // Handle new chat
-    const handleNewChat = useCallback(() => {
-        setActiveSessionId(null);
-        setCurrentView('welcome');
-        chatRef.current?.startNewChat();
-    }, []);
-
-    // Handle suggestion click from welcome screen
-    const handleSuggestionClick = useCallback((prompt: string) => {
-        setCurrentView('session');
-        // Small delay to ensure view has switched
-        setTimeout(() => {
-            chatRef.current?.sendMessage(prompt);
-        }, 100);
-    }, []);
-
-    // Handle session deletion
-    const handleDeleteSession = useCallback((sessionId: string) => {
-        if (sessionId === activeSessionId) {
-            setActiveSessionId(null);
-            setCurrentView('welcome');
-        }
-    }, [activeSessionId]);
-
-    // Loading state
-    if (!isHydrated || isLoading) {
+    if (!mounted) {
         return (
-            <div className="flex items-center justify-center h-screen bg-[#141414]">
-                <div className="flex flex-col items-center gap-4">
-                    <div
-                        className="animate-spin h-10 w-10 border-4 border-[#e07a5f] border-t-transparent rounded-full"/>
-                    <p className="text-[#a1a1aa] text-sm">Loading Maestro AI...</p>
-                </div>
+            <div className="flex h-screen items-center justify-center bg-[var(--color-bg-primary)]">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
             </div>
         );
     }
 
-    // Get project ID for chat
-    const projectId = selectedProject?.id;
-
     return (
-        <div className="flex h-screen w-full overflow-hidden bg-[#141414]">
-            {/* Mobile backdrop */}
-            {sidebarOpen && (
-                <div
-                    className="fixed inset-0 z-40 bg-black/60 lg:hidden transition-opacity"
-                    onClick={() => setSidebarOpen(false)}
-                />
-            )}
-
-            {/* Sidebar */}
-            <Sidebar
-                appName="Maestro AI"
-                repos={repos}
-                branches={branches}
-                sessions={sessions}
-                user={user}
-                mobileOpen={sidebarOpen}
-                activeSessionId={activeSessionId}
-                projectId={projectId}
-                onCloseMobile={() => setSidebarOpen(false)}
-                onSelectSession={handleSelectSession}
-                onSelectRepo={handleSelectRepo}
-                onSelectBranch={handleSelectBranch}
-                onNewChat={handleNewChat}
-                onDeleteSession={handleDeleteSession}
+        <div className="flex h-screen w-full bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] overflow-hidden font-sans selection:bg-[var(--color-primary)] selection:text-white">
+            <DevSidebar
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                mobileOpen={mobileOpen}
+                onCloseMobile={() => setMobileOpen(false)}
             />
 
-            {/* Main content */}
-            <main className="relative flex flex-1 flex-col overflow-hidden">
-                {/* Mobile header */}
-                <header className="flex h-12 items-center gap-3 border-b border-[#2b2b2b] bg-[#1b1b1b] px-4 lg:hidden">
+            <main className="flex-1 flex flex-col min-w-0">
+                {/* Mobile Header */}
+                <div className="lg:hidden flex items-center h-14 px-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                     <button
-                        className="flex h-8 w-8 items-center justify-center rounded-md text-[#a1a1aa] transition-colors hover:bg-white/5"
-                        onClick={() => setSidebarOpen(true)}
+                        onClick={() => setMobileOpen(true)}
+                        className="p-2 rounded-lg hover:bg-[var(--color-bg-hover)]"
                     >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M4 6h16M4 12h16M4 18h16"
-                            />
-                        </svg>
+                        <Menu className="h-5 w-5 text-[var(--color-text-muted)]" />
                     </button>
-                    <span className="text-sm font-medium text-[#f3f4f6]">Maestro AI</span>
-                    {selectedRepo && (
-                        <span className="ml-auto text-xs text-[#666666]">
-              {selectedRepo.owner}/{selectedRepo.name}
-            </span>
-                    )}
-                </header>
-
-                {/* Content area */}
-                <div className="flex-1 overflow-hidden">
-                    {!projectId ? (
-                        // No project selected
-                        <div className="flex items-center justify-center h-full">
-                            <div className="text-center">
-                                <div
-                                    className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#202020] mb-4">
-                                    <svg
-                                        className="w-8 h-8 text-[#666666]"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth="1.5"
-                                            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                                        />
-                                    </svg>
-                                </div>
-                                <h3 className="text-lg font-medium text-[#E0E0DE] mb-2">No project selected</h3>
-                                <p className="text-sm text-[#666666] max-w-xs">
-                                    Select a repository from the sidebar to connect a project and start coding with AI
-                                </p>
-                            </div>
-                        </div>
-                    ) : currentView === 'welcome' ? (
-                        // Welcome screen with suggestions
-                        <WelcomeScreen
-                            selectedRepo={selectedRepo}
-                            onSuggestionClick={handleSuggestionClick}
-                        />
-                    ) : (
-                        // Chat session view
-                        <SessionView
-                            ref={chatRef}
-                            projectId={projectId}
-                            conversationId={activeSessionId}
-                            onConversationChange={handleConversationChange}
-                        />
-                    )}
+                    <span className="ml-3 font-semibold text-[var(--color-text-primary)]">
+            DEV_CONSOLE
+          </span>
                 </div>
+
+                <AnimatePresence mode="wait">
+                    {/* Dashboard View */}
+                    {activeTab === 'dashboard' && (
+                        <motion.div
+                            key="dashboard"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="flex-1 p-6 overflow-y-auto"
+                        >
+                            <div className="grid grid-cols-12 gap-6">
+                                {/* Header */}
+                                <div className="col-span-12 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-1">
+                                            Overview
+                                        </h1>
+                                        <p className="text-[var(--color-text-dimmer)] text-sm">
+                                            System status and recent activity
+                                        </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        {/* Project Selector */}
+                                        <ProjectSelector
+                                            projects={projects}
+                                            selectedProject={selectedProject}
+                                            onSelect={setSelectedProjectId}
+                                            loading={loading}
+                                        />
+
+                                        {/* Refresh Button */}
+                                        <button
+                                            onClick={refetch}
+                                            disabled={loading}
+                                            className="p-2 rounded-lg border border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-surface)] transition-colors disabled:opacity-50"
+                                            title="Refresh data"
+                                        >
+                                            <RefreshCw className={`h-4 w-4 text-[var(--color-text-muted)] ${loading ? 'animate-spin' : ''}`} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Main Content Area */}
+                                <div className="col-span-12 lg:col-span-8 space-y-6">
+                                    {/* Stat Cards */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        <StatCard
+                                            label="Total Projects"
+                                            value={projects.length.toString()}
+                                            change={selectedProject ? `${selectedProject.indexed_files_count} files` : ''}
+                                            changeType="neutral"
+                                            delay={0}
+                                        />
+                                        <StatCard
+                                            label="API Requests (Today)"
+                                            value={stats?.today.requests.toString() || '0'}
+                                            change={stats ? `$${stats.today.cost.toFixed(4)}` : '$0'}
+                                            changeType="neutral"
+                                            delay={0.1}
+                                        />
+                                        <StatCard
+                                            label="Health Score"
+                                            value={health?.score?.toString() || selectedProject?.health_score?.toString() || 'N/A'}
+                                            change={health?.production_ready ? 'Production Ready' : 'Needs Review'}
+                                            changeType={health?.production_ready ? 'positive' : 'neutral'}
+                                            delay={0.2}
+                                        />
+                                    </div>
+
+                                    {/* Data Table - Git Changes */}
+                                    {changesLoading ? (
+                                        <div className="flex items-center justify-center h-48 border border-[var(--color-border-subtle)] rounded-sm">
+                                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
+                                        </div>
+                                    ) : deployments.length > 0 ? (
+                                        <DataTable deployments={deployments} title="Recent Changes" />
+                                    ) : (
+                                        <div className="border border-[var(--color-border-subtle)] rounded-sm p-8">
+                                            <EmptyState type="generic" message="No code changes yet" />
+                                        </div>
+                                    )}
+
+                                    {/* Diff Preview - Show latest change with files */}
+                                    {changes.length > 0 && changes[0].files_changed && changes[0].files_changed.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
+                                                Latest Change
+                                            </h3>
+                                            <DiffPreview
+                                                fileName={changes[0].files_changed[0].file}
+                                                additions={changes[0].files_changed.filter(f => f.action === 'create' || f.action === 'modify').length}
+                                                deletions={changes[0].files_changed.filter(f => f.action === 'delete').length}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Right Sidebar */}
+                                <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
+                                    {/* Activity Feed */}
+                                    <div className="bg-[var(--color-bg-surface)]/30 border border-[var(--color-border-subtle)] rounded-sm p-4 h-[400px]">
+                                        {activitiesLoading ? (
+                                            <div className="flex items-center justify-center h-full">
+                                                <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
+                                            </div>
+                                        ) : activities.length > 0 ? (
+                                            <ActivityFeed activities={activities} />
+                                        ) : (
+                                            <EmptyState type="generic" message="No recent activity" />
+                                        )}
+                                    </div>
+
+                                    {/* Chat Panel */}
+                                    <div className="border border-[var(--color-border-subtle)] rounded-sm overflow-hidden h-[350px]">
+                                        <DevChatPanel projectId={selectedProject?.id} />
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Files View */}
+                    {activeTab === 'files' && (
+                        <motion.div
+                            key="files"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex-1 flex h-full"
+                        >
+                            <div className="w-64 border-r border-[var(--color-border-subtle)]">
+                                <DevFileExplorer projectId={selectedProject?.id} />
+                            </div>
+                            <div className="flex-1 flex items-center justify-center bg-[var(--color-bg-surface)]">
+                                <EmptyState type="files" message="Select a file to view contents" />
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Git / Terminal View */}
+                    {(activeTab === 'git' || activeTab === 'terminal') && (
+                        <motion.div
+                            key="other"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex-1 flex items-center justify-center"
+                        >
+                            <EmptyState
+                                type="generic"
+                                message={activeTab === 'git' ? 'Source Control not connected' : 'Terminal not available'}
+                                action={{
+                                    label: activeTab === 'git' ? 'Connect Repository' : 'Open Terminal',
+                                    onClick: () => console.log(`${activeTab} action clicked`),
+                                }}
+                            />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </main>
         </div>
     );
+}
+
+// Helper functions
+function mapChangeStatus(status: string): 'ready' | 'building' | 'error' | 'queued' {
+    switch (status) {
+        case 'merged':
+        case 'pr_merged':
+        case 'applied':
+            return 'ready';
+        case 'pending':
+        case 'pr_created':
+            return 'building';
+        case 'rolled_back':
+        case 'discarded':
+            return 'error';
+        default:
+            return 'queued';
+    }
+}
+
+function formatTimeAgo(dateString: string): string {
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
 }
