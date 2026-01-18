@@ -262,7 +262,7 @@ export function InteractiveChat({
 
     try {
       // Use interactive mode
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}/chat`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/projects/${projectId}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
