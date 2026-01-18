@@ -296,6 +296,21 @@ export const githubApi = {
   getRepo: (repoId: number) => api.get(`/github/repos/${repoId}`),
 };
 
+export interface PlanApprovalRequest {
+  conversation_id: string;
+  approved: boolean;
+  modified_plan?: {
+    summary: string;
+    steps: Array<{
+      order: number;
+      action: string;
+      file: string;
+      description: string;
+    }>;
+  };
+  rejection_reason?: string;
+}
+
 export const chatApi = {
   // List conversations for a project
   listConversations: (projectId: string) =>
@@ -311,6 +326,13 @@ export const chatApi = {
 
   // Chat endpoint URL (for SSE)
   getChatUrl: (projectId: string) => `${API_URL}/projects/${projectId}/chat`,
+
+  // Approve or reject a plan in interactive mode
+  approvePlan: (projectId: string, data: PlanApprovalRequest) =>
+    api.post(`/projects/${projectId}/chat/approve-plan`, data),
+
+  // Get available agents
+  getAgents: () => api.get('/chat/agents'),
 };
 
 export interface FileChange {

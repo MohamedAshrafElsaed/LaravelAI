@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, User, Bot, Loader2, Plus, Trash2, MessageSquare, History, AlertCircle } from 'lucide-react';
+import { Send, User, Bot, Loader2, Plus, Trash2, MessageSquare, History, AlertCircle, Sparkles, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { InlineProgress } from './InlineProgress';
@@ -9,6 +9,7 @@ import { chatApi, getErrorMessage } from '@/lib/api';
 import { useToast } from './Toast';
 import { SkeletonConversationList, SkeletonChatMessages } from './ui/Skeleton';
 import { Button } from './ui/Button';
+import InteractiveChat from './interactive/agent/InteractiveChat';
 
 interface ProcessingData {
   intent?: any;
@@ -88,6 +89,21 @@ export function Chat({
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Interactive mode toggle (multi-agent experience)
+  const [interactiveMode, setInteractiveMode] = useState<boolean>(() => {
+    // Load preference from localStorage on mount
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('chat_interactive_mode');
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Save interactive mode preference
+  useEffect(() => {
+    localStorage.setItem('chat_interactive_mode', interactiveMode.toString());
+  }, [interactiveMode]);
 
   // Load conversations list
   const loadConversations = useCallback(async () => {
@@ -382,6 +398,42 @@ export function Chat({
     }
   };
 
+  // If interactive mode is enabled, render the InteractiveChat component
+  if (interactiveMode) {
+    return (
+      <div className="flex h-full flex-col bg-gray-950">
+        {/* Header with mode toggle */}
+        <div className="flex items-center justify-between border-b border-gray-800 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setInteractiveMode(false)}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+              title="Switch to Classic Mode"
+            >
+              <Zap className="h-4 w-4" />
+              <span className="hidden sm:inline">Classic Mode</span>
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 text-sm">
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">Multi-Agent Mode</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Interactive Chat Component */}
+        <div className="flex-1 overflow-hidden">
+          <InteractiveChat
+            projectId={projectId}
+            conversationId={conversationId || undefined}
+            onConversationChange={onConversationChange}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-gray-950">
       {/* Header with actions */}
@@ -402,6 +454,15 @@ export function Chat({
                 {conversations.length}
               </span>
             )}
+          </button>
+          {/* Interactive Mode Toggle */}
+          <button
+            onClick={() => setInteractiveMode(true)}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-purple-400 hover:bg-purple-500/20 transition-colors"
+            title="Switch to Multi-Agent Mode"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">Multi-Agent</span>
           </button>
         </div>
         <button

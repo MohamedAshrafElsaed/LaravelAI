@@ -22,6 +22,9 @@ from app.core.security import get_current_user
 from app.core.prompts import CHAT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT_SIMPLE
 from app.models.models import Project, User, ProjectStatus, Conversation, Message
 from app.agents.orchestrator import Orchestrator, ProcessEvent, ProcessPhase
+from app.agents.interactive_orchestrator import InteractiveOrchestrator
+from app.agents.agent_identity import get_all_agents
+from app.agents.events import EventType as AgentEventType
 from app.services.claude import get_claude_service, create_tracked_claude_service, ClaudeModel
 from app.services.usage_tracker import UsageTracker
 from app.services.conversation_logger import (
@@ -72,6 +75,24 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
     message: str
     conversation_id: Optional[str] = None
+    interactive_mode: bool = False  # Enable interactive multi-agent experience
+    require_plan_approval: bool = True  # Pause for plan approval in interactive mode
+
+
+class PlanApprovalRequest(BaseModel):
+    """Request body for plan approval."""
+    conversation_id: str
+    approved: bool = True
+    modified_plan: Optional[dict] = None  # Modified plan if user made changes
+    rejection_reason: Optional[str] = None  # Reason if rejected
+
+
+class PlanStepRequest(BaseModel):
+    """Individual plan step for modification."""
+    order: int
+    action: str  # create, modify, delete
+    file: str
+    description: str
 
 
 class ChatResponse(BaseModel):
@@ -778,7 +799,308 @@ Answer the question based on this project's specific technology stack, conventio
         })
 
 
+# ============== Interactive Streaming Generator ==============
+
+async def stream_interactive_chat_response(
+    project_id: str,
+    message: str,
+    conversation_id: str,
+    user_id: str,
+    db: AsyncSession,
+    require_plan_approval: bool = True,
+) -> AsyncGenerator[str, None]:
+    """
+    Generate SSE stream for interactive chat response with named agents.
+
+    This provides a fully interactive multi-agent experience with:
+    - Named AI agents with distinct personalities
+    - Real-time thinking animations
+    - Plan approval gateway
+    - Detailed agent conversation display
+    """
+    logger.info(f"[CHAT] Starting interactive stream for project={project_id}, conversation={conversation_id}")
+
+    # Start AI operations session
+    ops_session_id = _ops_logger.start_chat_session(
+        user_id=user_id,
+        project_id=project_id,
+        conversation_id=conversation_id,
+    )
+
+    # Get or create conversation
+    conversation = await get_or_create_conversation(db, user_id, project_id, conversation_id)
+
+    # Initialize conversation logger
+    conv_logger = get_conversation_logger(
+        conversation_id=conversation.id,
+        project_id=project_id,
+        user_id=user_id,
+    )
+
+    # Fetch conversation history
+    history = await get_conversation_history(db, conversation.id, limit=10)
+    conversation_context = format_conversation_history(history)
+    message_count = len(history) + 1
+
+    # Log user message
+    conv_logger.log_user_message(
+        message=message,
+        message_number=message_count,
+        conversation_context=conversation_context if conversation_context else None,
+    )
+
+    # Save user message
+    await save_message(db, conversation.id, "user", message)
+
+    # Build message with context
+    if conversation_context:
+        message_with_context = f"""{conversation_context}
+
+<current_request>
+{message}
+</current_request>
+
+IMPORTANT: Consider the conversation history above when processing this request."""
+    else:
+        message_with_context = message
+
+    # Event queue for the orchestrator
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def event_callback(event_str: str) -> None:
+        """Callback to receive SSE event strings."""
+        await event_queue.put(event_str)
+
+    # Send connected event with agent info
+    agents_info = [agent.to_dict() for agent in get_all_agents()]
+    yield create_sse_event(EventType.CONNECTED, {
+        "conversation_id": conversation.id,
+        "message": "Connected to interactive chat stream",
+        "interactive_mode": True,
+        "agents": agents_info,
+    })
+
+    try:
+        # Create tracked Claude service
+        tracker = UsageTracker(db)
+        claude_service = create_tracked_claude_service(
+            tracker=tracker,
+            user_id=user_id,
+            project_id=project_id,
+        )
+
+        # Create interactive orchestrator
+        orchestrator = InteractiveOrchestrator(
+            db=db,
+            event_callback=event_callback,
+            claude_service=claude_service,
+            conversation_logger=conv_logger,
+            require_plan_approval=require_plan_approval,
+        )
+
+        # Store orchestrator for plan approval
+        _active_orchestrators[conversation.id] = orchestrator
+
+        # Start processing in background
+        process_task = asyncio.create_task(
+            orchestrator.process_request(project_id, message_with_context)
+        )
+
+        # Stream events as they come
+        while not process_task.done():
+            try:
+                event_str = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                yield event_str
+            except asyncio.TimeoutError:
+                continue
+
+        # Get final result
+        result = await process_task
+
+        # Drain remaining events
+        while not event_queue.empty():
+            event_str = await event_queue.get()
+            yield event_str
+
+        # Remove from active orchestrators
+        _active_orchestrators.pop(conversation.id, None)
+
+        # Build response content
+        if result.success:
+            if not result.plan and not result.execution_results:
+                # Question - generate answer
+                logger.info("[CHAT] Intent classified as question, generating answer...")
+                intent = result.intent
+                context = await orchestrator.context_retriever.retrieve(project_id, intent) if intent else None
+                project_context = orchestrator.build_project_context(await orchestrator._get_project(project_id))
+
+                user_prompt = f"""<question>
+{message}
+</question>
+
+<project_info>
+{project_context}
+</project_info>
+
+<codebase_context>
+{context.to_prompt_string() if context else "No context available"}
+</codebase_context>
+
+Answer based on this project's specific technology stack, conventions, and patterns."""
+
+                messages_for_claude = [{"role": "user", "content": user_prompt}]
+                full_response = ""
+
+                async for chunk in claude_service.stream_cached(
+                    model=ClaudeModel.SONNET,
+                    messages=messages_for_claude,
+                    system=CHAT_SYSTEM_PROMPT,
+                    temperature=0.7,
+                    request_type="chat",
+                ):
+                    full_response += chunk
+                    yield create_sse_event(EventType.ANSWER_CHUNK, {"chunk": chunk})
+
+                response_content = full_response
+            else:
+                # Task completion
+                summary_parts = []
+                if result.plan:
+                    summary_parts.append(f"**Plan:** {result.plan.summary}")
+                if result.execution_results:
+                    summary_parts.append(f"\n**Files changed:** {len(result.execution_results)}")
+                    for r in result.execution_results:
+                        summary_parts.append(f"- [{r.action}] {r.file}")
+                if result.validation:
+                    summary_parts.append(f"\n**Validation score:** {result.validation.score}/100")
+                response_content = "\n".join(summary_parts) if summary_parts else "Task completed successfully."
+        else:
+            error_msg = result.error
+            if not error_msg and result.validation and result.validation.errors:
+                error_msg = "; ".join([e.message for e in result.validation.errors[:3]])
+            if not error_msg:
+                error_msg = "Unknown error occurred during processing"
+            response_content = f"Failed to process request: {error_msg}"
+
+        # Save assistant message
+        code_changes = {
+            "results": [r.to_dict() for r in result.execution_results],
+            "validation": result.validation.to_dict() if result.validation else None,
+        } if result.execution_results else None
+
+        processing_data = {
+            "intent": result.intent.to_dict() if result.intent else None,
+            "plan": result.plan.to_dict() if result.plan else None,
+            "execution_results": [r.to_dict() for r in result.execution_results],
+            "validation": result.validation.to_dict() if result.validation else None,
+            "events": [e.to_dict() for e in result.events],
+            "success": result.success,
+            "error": result.error,
+            "agent_timeline": orchestrator.get_timeline_summary(),
+        }
+
+        await save_message(db, conversation.id, "assistant", response_content, code_changes, processing_data=processing_data)
+
+        # Log response
+        conv_logger.log_response(
+            response_content=response_content,
+            response_type="assistant",
+            is_streaming=False,
+        )
+
+        # Finalize log
+        log_paths = finalize_conversation_logger(conversation.id)
+        ops_summary = _ops_logger.end_chat_session(ops_session_id)
+
+        # Send complete event with timeline
+        yield create_sse_event(EventType.COMPLETE, {
+            "success": result.success,
+            "answer": response_content,
+            "plan": result.plan.to_dict() if result.plan else None,
+            "execution_results": [r.to_dict() for r in result.execution_results],
+            "validation": result.validation.to_dict() if result.validation else None,
+            "error": result.error,
+            "agent_timeline": orchestrator.get_timeline_summary(),
+            "log_paths": log_paths,
+            "ops_summary": ops_summary,
+        })
+
+    except Exception as e:
+        logger.exception(f"[CHAT] Interactive stream error: {e}")
+        _active_orchestrators.pop(conversation.id, None)
+        _ops_logger.log(
+            operation_type=OperationType.ERROR,
+            message=f"Interactive stream error: {str(e)}",
+            user_id=user_id,
+            project_id=project_id,
+            success=False,
+            error=str(e),
+        )
+        _ops_logger.end_chat_session(ops_session_id)
+        conv_logger.log_error(
+            error_message=str(e),
+            error_type="interactive_stream_error",
+        )
+        finalize_conversation_logger(conversation.id)
+        await save_message(db, conversation.id, "assistant", f"Error: {str(e)}")
+        yield create_sse_event(EventType.ERROR, {"message": str(e)})
+
+
 # ============== API Endpoints ==============
+
+@router.get("/agents")
+async def get_agents(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get information about all AI agents in the system.
+
+    Returns agent identities with names, roles, colors, and personalities.
+    """
+    agents = [agent.to_dict() for agent in get_all_agents()]
+    return {
+        "success": True,
+        "agents": agents,
+    }
+
+
+@router.post("/{project_id}/chat/approve-plan")
+async def approve_plan(
+    project_id: str,
+    request: PlanApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Approve, modify, or reject the current plan for interactive chat.
+
+    This endpoint is called when the user makes a decision on the plan
+    in interactive mode.
+    """
+    logger.info(f"[CHAT] POST /projects/{project_id}/chat/approve-plan - conversation_id={request.conversation_id}")
+
+    # Get the active orchestrator
+    orchestrator = _active_orchestrators.get(request.conversation_id)
+
+    if not orchestrator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active plan awaiting approval for this conversation",
+        )
+
+    # Apply the approval
+    await orchestrator.approve_plan(
+        approved=request.approved,
+        modified_plan=request.modified_plan,
+        rejection_reason=request.rejection_reason,
+    )
+
+    return {
+        "success": True,
+        "message": "Plan approval received" if request.approved else "Plan rejected",
+        "approved": request.approved,
+    }
+
 
 @router.get("/{project_id}/conversations", response_model=List[ConversationResponse])
 async def list_conversations(
@@ -1101,7 +1423,10 @@ async def chat_with_project(
 
     Returns Server-Sent Events (SSE) stream with progress updates.
 
-    Events:
+    Set `interactive_mode: true` to enable the full interactive multi-agent experience
+    with named agents, thinking animations, and plan approval gateway.
+
+    Events (standard mode):
     - connected: Connection established
     - intent_analyzed: User intent understood
     - context_retrieved: Relevant code found
@@ -1113,8 +1438,20 @@ async def chat_with_project(
     - answer_chunk: Streaming text response (for questions)
     - complete: Processing finished
     - error: An error occurred
+
+    Additional events (interactive mode):
+    - agent_thinking: Agent is processing with thought message
+    - agent_message: Agent sends a message in conversation
+    - agent_handoff: Agent passes work to another agent
+    - agent_state_change: Agent becomes active/idle
+    - planning_thinking: Blueprint's planning thought process
+    - plan_step_added: A step was added to the plan
+    - plan_ready: Plan ready for user approval
+    - step_thinking: Forge's thinking during execution
+    - validation_thinking: Guardian's validation thoughts
+    - validation_issue_found: Guardian found an issue
     """
-    logger.info(f"[CHAT] POST /projects/{project_id}/chat - user_id={current_user.id}")
+    logger.info(f"[CHAT] POST /projects/{project_id}/chat - user_id={current_user.id}, interactive={request.interactive_mode}")
 
     # Verify project access
     project = await verify_project_access(project_id, current_user, db)
@@ -1124,9 +1461,27 @@ async def chat_with_project(
 
     logger.info(f"[CHAT] Processing message: {request.message[:100]}...")
 
-    # Determine if this is a question or action request
-    # For now, we'll use a simple heuristic - questions end with ?
-    # The intent analyzer will refine this
+    # Check for interactive mode
+    if request.interactive_mode:
+        # Stream interactive response with named agents
+        return StreamingResponse(
+            stream_interactive_chat_response(
+                project_id=project_id,
+                message=request.message,
+                conversation_id=conversation_id,
+                user_id=current_user.id,
+                db=db,
+                require_plan_approval=request.require_plan_approval,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # Standard mode - determine if this is a question or action request
     is_likely_question = request.message.strip().endswith("?")
 
     if is_likely_question:
@@ -1143,7 +1498,7 @@ async def chat_with_project(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "X-Accel-Buffering": "no",
             },
         )
     else:
@@ -1585,6 +1940,9 @@ class BatchStatusResponse(BaseModel):
 # Store batch processor and jobs
 _batch_processor = None
 _batch_jobs: dict = {}
+
+# Store active interactive orchestrators for plan approval
+_active_orchestrators: dict = {}
 
 
 def _get_batch_processor():
