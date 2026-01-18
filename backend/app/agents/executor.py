@@ -251,6 +251,7 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 - Keep ALL existing functionality intact
 - Only make the minimal changes needed to fix the identified issues
 - The output should contain the ENTIRE file, not just the fixes
+- NEVER delete or replace an entire file when asked to modify styles/content
 
 **For each issue:**
 1. Identify the exact location of the problem
@@ -270,12 +271,21 @@ You are an expert Laravel developer fixing specific code issues. Focus ONLY on t
 - The fix is to KEEP all existing routes AND add the new route
 - Look at the original routes/api.php content and ensure all existing routes are preserved
 
+**For "Entire file deleted" / Critical Errors (score=0):**
+- This is a CRITICAL error that must be fixed immediately
+- You MUST regenerate the COMPLETE file from the original content provided
+- Look at <original_file_content> and use that as the BASE
+- Apply the requested changes (e.g., style updates) while keeping ALL functionality
+- The fix MUST include ALL of the original components, sections, and logic
+- For style changes: Update CSS/classes but preserve the full template structure
+
 **Do NOT:**
 - Refactor code that wasn't mentioned in issues
-- Change code style or formatting
+- Change code style or formatting beyond what's requested
 - Add features not requested
 - Remove functionality that works
 - Delete existing code unless explicitly requested
+- NEVER output an empty or minimal file when the original was substantial
 </fix_guidelines>
 
 Respond ONLY with the JSON object."""

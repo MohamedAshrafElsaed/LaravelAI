@@ -22,6 +22,11 @@ class AgentConfig:
     SCORE_DEGRADATION_THRESHOLD: int = 5  # Abort if score drops by this much
     MAX_FIX_ATTEMPTS: int = 3
 
+    # Critical Failure Auto-Fix
+    ENABLE_AUTO_FIX_CRITICAL: bool = True  # Auto-fix even on critical failures (score=0)
+    CRITICAL_FAILURE_THRESHOLD: int = 10  # Score at or below this is considered critical
+    REGENERATE_ON_DELETION: bool = True  # Regenerate file if entirely deleted
+
     # Execution Settings
     REQUIRE_FILE_EXISTS_FOR_MODIFY: bool = True
     ENABLE_SELF_VERIFICATION: bool = True
@@ -46,6 +51,9 @@ class AgentConfig:
             REQUIRE_FILE_EXISTS_FOR_MODIFY=os.getenv("AGENT_REQUIRE_FILE_EXISTS_FOR_MODIFY", "true").lower() == "true",
             ENABLE_SELF_VERIFICATION=os.getenv("AGENT_ENABLE_SELF_VERIFICATION", "true").lower() == "true",
             ENABLE_CONTRADICTION_DETECTION=os.getenv("AGENT_ENABLE_CONTRADICTION_DETECTION", "true").lower() == "true",
+            ENABLE_AUTO_FIX_CRITICAL=os.getenv("AGENT_ENABLE_AUTO_FIX_CRITICAL", "true").lower() == "true",
+            CRITICAL_FAILURE_THRESHOLD=int(os.getenv("AGENT_CRITICAL_FAILURE_THRESHOLD", "10")),
+            REGENERATE_ON_DELETION=os.getenv("AGENT_REGENERATE_ON_DELETION", "true").lower() == "true",
         )
 
 

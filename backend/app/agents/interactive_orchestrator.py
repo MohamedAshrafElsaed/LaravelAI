@@ -798,11 +798,14 @@ class InteractiveOrchestrator:
             previous_score = initial_score
             retry_count = 0
 
+            # Detect critical failure (e.g., file deleted entirely)
+            is_critical_failure = initial_score <= self.config.CRITICAL_FAILURE_THRESHOLD
+
             while not validation.approved and retry_count < self.config.MAX_FIX_ATTEMPTS:
                 retry_count += 1
 
-                # Circuit breaker
-                if self.config.ABORT_ON_SCORE_DEGRADATION:
+                # Circuit breaker - but allow at least one fix attempt for critical failures
+                if self.config.ABORT_ON_SCORE_DEGRADATION and retry_count > 1:
                     if validation.score < previous_score - self.config.SCORE_DEGRADATION_THRESHOLD:
                         await self._emit_event(agent_message(
                             GUARDIAN.agent_type.value,
@@ -812,7 +815,9 @@ class InteractiveOrchestrator:
                         ))
                         break
 
-                    if validation.score < self.config.MIN_VALIDATION_SCORE:
+                    # Only apply MIN_VALIDATION_SCORE check after first attempt
+                    # This ensures we always try at least once to fix, even critical failures
+                    if validation.score < self.config.MIN_VALIDATION_SCORE and not is_critical_failure:
                         await self._emit_event(agent_message(
                             GUARDIAN.agent_type.value,
                             GUARDIAN.name,
@@ -820,6 +825,15 @@ class InteractiveOrchestrator:
                             "error",
                         ))
                         break
+
+                # For critical failures on first attempt, emit a recovery message
+                if is_critical_failure and retry_count == 1:
+                    await self._emit_event(agent_message(
+                        GUARDIAN.agent_type.value,
+                        GUARDIAN.name,
+                        f"Critical issue detected (score: {initial_score}). Attempting automatic recovery...",
+                        "warning",
+                    ))
 
                 previous_score = validation.score
 
@@ -900,20 +914,59 @@ class InteractiveOrchestrator:
                         file_issues = all_issues
 
                     if file_issues:
-                        # Emit thinking for fix
-                        await self._emit_thinking_sequence(
-                            FORGE,
-                            "modify",
-                            count=2,
-                            delay=0.5,
-                            file_path=exec_result.file,
+                        # Detect if file was completely deleted (critical failure)
+                        file_was_deleted = (
+                            is_critical_failure
+                            and self.config.REGENERATE_ON_DELETION
+                            and retry_count == 1
+                            and any("deleted" in issue.lower() or "entire file" in issue.lower() for issue in file_issues)
                         )
 
-                        fixed = await self.executor.fix_execution(
-                            result=exec_result,
-                            issues=file_issues,
-                            context=context,
-                        )
+                        if file_was_deleted:
+                            # File was deleted - need to regenerate entirely
+                            await self._emit_event(agent_message(
+                                FORGE.agent_type.value,
+                                FORGE.name,
+                                f"File was incorrectly deleted. Regenerating {exec_result.file}...",
+                                "warning",
+                            ))
+
+                            # Emit thinking for regeneration
+                            await self._emit_thinking_sequence(
+                                FORGE,
+                                "create",
+                                count=3,
+                                delay=0.8,
+                                file_path=exec_result.file,
+                            )
+
+                            # Regenerate the file using the executor with original intent
+                            regeneration_issues = file_issues + [
+                                "CRITICAL: The previous attempt deleted the entire file instead of modifying it.",
+                                "You MUST preserve all existing functionality while making the requested changes.",
+                                "Regenerate the complete file with proper styling changes as requested.",
+                            ]
+
+                            fixed = await self.executor.fix_execution(
+                                result=exec_result,
+                                issues=regeneration_issues,
+                                context=context,
+                            )
+                        else:
+                            # Normal fix attempt
+                            await self._emit_thinking_sequence(
+                                FORGE,
+                                "modify",
+                                count=2,
+                                delay=0.5,
+                                file_path=exec_result.file,
+                            )
+
+                            fixed = await self.executor.fix_execution(
+                                result=exec_result,
+                                issues=file_issues,
+                                context=context,
+                            )
                         execution_results[idx] = fixed
 
                 result.execution_results = execution_results

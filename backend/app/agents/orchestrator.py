@@ -426,11 +426,14 @@ class Orchestrator:
             previous_score = initial_score
             retry_count = 0
 
+            # Detect critical failure (e.g., file deleted entirely)
+            is_critical_failure = initial_score <= self.config.CRITICAL_FAILURE_THRESHOLD
+
             while not validation.approved and retry_count < self.config.MAX_FIX_ATTEMPTS:
                 retry_count += 1
 
-                # Circuit breaker - abort if score degrades
-                if self.config.ABORT_ON_SCORE_DEGRADATION:
+                # Circuit breaker - but allow at least one fix attempt for critical failures
+                if self.config.ABORT_ON_SCORE_DEGRADATION and retry_count > 1:
                     if validation.score < previous_score - self.config.SCORE_DEGRADATION_THRESHOLD:
                         logger.error(
                             f"[ORCHESTRATOR] Score degraded: {previous_score} -> {validation.score}. Aborting."
@@ -443,7 +446,8 @@ class Orchestrator:
                         result.events.append(event)
                         break
 
-                    if validation.score < self.config.MIN_VALIDATION_SCORE:
+                    # Only apply MIN_VALIDATION_SCORE check after first attempt
+                    if validation.score < self.config.MIN_VALIDATION_SCORE and not is_critical_failure:
                         logger.error(f"[ORCHESTRATOR] Score too low: {validation.score}. Aborting.")
                         event = await self._emit_event(
                             ProcessPhase.FAILED,
@@ -452,6 +456,10 @@ class Orchestrator:
                         )
                         result.events.append(event)
                         break
+
+                # Log critical failure recovery attempt
+                if is_critical_failure and retry_count == 1:
+                    logger.warning(f"[ORCHESTRATOR] Critical failure detected (score={initial_score}). Attempting recovery...")
 
                 previous_score = validation.score
 
@@ -531,12 +539,34 @@ class Orchestrator:
                         file_issues = all_issues
 
                     if file_issues:
-                        logger.info(f"[ORCHESTRATOR] Fixing {exec_result.file} with {len(file_issues)} issues")
-                        fixed = await self.executor.fix_execution(
-                            result=exec_result,
-                            issues=file_issues,
-                            context=context,
+                        # Detect if file was completely deleted (critical failure)
+                        file_was_deleted = (
+                            is_critical_failure
+                            and self.config.REGENERATE_ON_DELETION
+                            and retry_count == 1
+                            and any("deleted" in issue.lower() or "entire file" in issue.lower() for issue in file_issues)
                         )
+
+                        if file_was_deleted:
+                            logger.warning(f"[ORCHESTRATOR] File {exec_result.file} was incorrectly deleted. Regenerating...")
+                            # Regenerate the file with critical context
+                            regeneration_issues = file_issues + [
+                                "CRITICAL: The previous attempt deleted the entire file instead of modifying it.",
+                                "You MUST preserve all existing functionality while making the requested changes.",
+                                "Regenerate the complete file with proper styling changes as requested.",
+                            ]
+                            fixed = await self.executor.fix_execution(
+                                result=exec_result,
+                                issues=regeneration_issues,
+                                context=context,
+                            )
+                        else:
+                            logger.info(f"[ORCHESTRATOR] Fixing {exec_result.file} with {len(file_issues)} issues")
+                            fixed = await self.executor.fix_execution(
+                                result=exec_result,
+                                issues=file_issues,
+                                context=context,
+                            )
                         execution_results[idx] = fixed
 
                 result.execution_results = execution_results
