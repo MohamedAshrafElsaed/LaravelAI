@@ -81,6 +81,46 @@ class GitService:
         except InvalidGitRepositoryError:
             raise GitServiceError(f"Invalid git repository at {clone_path}")
 
+    def _update_remote_auth(self, repo: Repo) -> None:
+        """
+        Update the remote origin URL with the current authentication token.
+
+        This is necessary when the token has been refreshed but the repo
+        was cloned with an older token embedded in the URL.
+
+        Args:
+            repo: The git Repo object
+        """
+        try:
+            origin = repo.remotes.origin
+            current_url = origin.url
+
+            # Extract the repo path from the URL
+            # URL format: https://x-access-token:TOKEN@github.com/owner/repo.git
+            # or: https://github.com/owner/repo.git
+            if "github.com" in current_url:
+                # Extract owner/repo from URL
+                if "@github.com" in current_url:
+                    # Has auth embedded: https://x-access-token:...@github.com/owner/repo.git
+                    repo_path = current_url.split("@github.com/")[1]
+                else:
+                    # No auth: https://github.com/owner/repo.git
+                    repo_path = current_url.split("github.com/")[1]
+
+                # Remove .git suffix if present
+                repo_path = repo_path.rstrip(".git")
+
+                # Create new authenticated URL
+                new_url = self._get_authenticated_url(repo_path)
+
+                # Update the remote URL if it's different
+                if new_url != current_url:
+                    logger.debug(f"[GIT] Updating remote URL with fresh token for {repo_path}")
+                    repo.git.remote("set-url", "origin", new_url)
+
+        except Exception as e:
+            logger.warning(f"[GIT] Failed to update remote auth: {e}")
+
     def clone_repo(
         self,
         project_id: str,
@@ -233,16 +273,10 @@ class GitService:
                 logger.error(f"[GIT] Cannot pull on bare repository: {clone_path}")
                 raise GitServiceError("Cannot pull on a bare repository.")
 
-            # Fetch first to check for changes
-            origin = repo.remotes.origin
+            # Update remote URL with current token (in case token was refreshed)
+            self._update_remote_auth(repo)
 
-            # Re-authenticate the remote URL
-            # (token might have changed or been refreshed)
-            current_url = origin.url
-            if "@github.com" not in current_url:
-                # URL doesn't have auth, need to update
-                # This shouldn't happen normally but handle it
-                logger.warning(f"[GIT] Remote URL missing authentication")
+            origin = repo.remotes.origin
 
             # Pull changes
             logger.debug(f"[GIT] Executing git pull")
@@ -646,7 +680,9 @@ class GitService:
         logger.info(f"[GIT] Pushing branch to remote from {clone_path}")
         try:
             repo = Repo(clone_path)
-            origin = repo.remotes.origin
+
+            # Update remote URL with current token (in case token was refreshed)
+            self._update_remote_auth(repo)
 
             if branch_name is None:
                 branch_name = repo.active_branch.name
@@ -824,6 +860,9 @@ class GitService:
         logger.info(f"[GIT] Resetting to remote for {clone_path}")
         try:
             repo = Repo(clone_path)
+
+            # Update remote URL with current token (in case token was refreshed)
+            self._update_remote_auth(repo)
 
             if branch_name is None:
                 branch_name = repo.active_branch.name
