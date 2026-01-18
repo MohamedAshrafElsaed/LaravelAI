@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { AgentMessage, AgentMessageCompact, AgentHandoffMessage, SystemMessage } from './AgentMessage';
-import { AgentThinking, AgentThinkingCompact } from './AgentThinking';
+import { Check, ChevronRight, Loader2, AlertCircle, ArrowRight } from 'lucide-react';
 import {
   AgentType,
   AgentInfo,
@@ -15,7 +13,7 @@ import {
 
 export interface ConversationEntry {
   id: string;
-  type: 'message' | 'thinking' | 'handoff' | 'system';
+  type: 'message' | 'thinking' | 'handoff' | 'system' | 'step';
   timestamp: string;
   agentType?: AgentType;
   toAgentType?: AgentType;
@@ -26,6 +24,7 @@ export interface ConversationEntry {
   filePath?: string;
   progress?: number;
   systemType?: 'info' | 'success' | 'warning' | 'error';
+  completed?: boolean;
 }
 
 interface AgentConversationProps {
@@ -38,143 +37,133 @@ interface AgentConversationProps {
   className?: string;
 }
 
+// CLI-style agent prefix
+function AgentPrefix({ agent, isActive = false }: { agent: AgentInfo; isActive?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {isActive ? (
+        <Loader2 className="h-3 w-3 animate-spin" style={{ color: agent.color }} />
+      ) : (
+        <ChevronRight className="h-3 w-3" style={{ color: agent.color }} />
+      )}
+      <span className="font-semibold" style={{ color: agent.color }}>
+        {agent.name}
+      </span>
+    </span>
+  );
+}
+
+// CLI-style status indicator
+function StatusIcon({ status }: { status: 'pending' | 'active' | 'complete' | 'error' }) {
+  switch (status) {
+    case 'active':
+      return <Loader2 className="h-3 w-3 animate-spin text-blue-400" />;
+    case 'complete':
+      return <Check className="h-3 w-3 text-green-400" />;
+    case 'error':
+      return <AlertCircle className="h-3 w-3 text-red-400" />;
+    default:
+      return <span className="w-3 h-3 inline-block" />;
+  }
+}
+
 export function AgentConversation({
   entries,
   currentThinking,
   autoScroll = true,
-  maxHeight = '400px',
-  compact = false,
-  showTimestamps = false,
   className = '',
 }: AgentConversationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
-    if (autoScroll && containerRef.current && isExpanded) {
+    if (autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [entries, currentThinking, autoScroll, isExpanded]);
+  }, [entries, currentThinking, autoScroll]);
 
   if (entries.length === 0 && !currentThinking) {
     return null;
   }
 
-  const MessageComponent = compact ? AgentMessageCompact : AgentMessage;
-
   return (
-    <div className={`rounded-lg border border-gray-800 bg-gray-900/50 overflow-hidden ${className}`}>
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-2 bg-gray-800/50 cursor-pointer hover:bg-gray-800/70 transition-colors"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-300">Agent Activity</span>
-          <span className="text-xs text-gray-500">
-            {entries.length} {entries.length === 1 ? 'message' : 'messages'}
+    <div ref={containerRef} className={`font-mono text-sm space-y-1 ${className}`}>
+      {entries.map((entry) => {
+        const agent = entry.agentType ? getAgentInfo(entry.agentType) : getAgentInfo('conductor');
+
+        switch (entry.type) {
+          case 'message':
+            return (
+              <div key={entry.id} className="flex items-start gap-2 py-0.5 animate-fadeIn">
+                <AgentPrefix agent={agent} />
+                <span className="text-gray-300">{entry.message}</span>
+              </div>
+            );
+
+          case 'handoff':
+            const toAgent = entry.toAgentType ? getAgentInfo(entry.toAgentType) : getAgentInfo('conductor');
+            return (
+              <div key={entry.id} className="flex items-center gap-2 py-0.5 text-gray-500 animate-fadeIn">
+                <ArrowRight className="h-3 w-3" />
+                <span style={{ color: agent.color }}>{agent.name}</span>
+                <span>→</span>
+                <span style={{ color: toAgent.color }}>{toAgent.name}</span>
+                {entry.message && (
+                  <span className="text-gray-600 italic text-xs">"{entry.message}"</span>
+                )}
+              </div>
+            );
+
+          case 'thinking':
+            return (
+              <div key={entry.id} className="flex items-start gap-2 py-0.5 text-gray-500 animate-fadeIn">
+                <AgentPrefix agent={agent} />
+                <span className="italic">{entry.thought || 'Thinking...'}</span>
+              </div>
+            );
+
+          case 'step':
+            return (
+              <div key={entry.id} className="flex items-start gap-2 py-0.5 animate-fadeIn">
+                <StatusIcon status={entry.completed ? 'complete' : 'active'} />
+                <span className="text-gray-400">{entry.actionType}</span>
+                {entry.filePath && (
+                  <span className="text-blue-400">{entry.filePath}</span>
+                )}
+                {entry.message && (
+                  <span className="text-gray-500">- {entry.message}</span>
+                )}
+              </div>
+            );
+
+          case 'system':
+            const systemColors = {
+              info: 'text-gray-400',
+              success: 'text-green-400',
+              warning: 'text-yellow-400',
+              error: 'text-red-400',
+            };
+            return (
+              <div key={entry.id} className={`py-0.5 animate-fadeIn ${systemColors[entry.systemType || 'info']}`}>
+                <span className="text-gray-600">›</span> {entry.message}
+              </div>
+            );
+
+          default:
+            return null;
+        }
+      })}
+
+      {/* Current thinking state - CLI style */}
+      {currentThinking && (
+        <div className="flex items-start gap-2 py-0.5 animate-fadeIn">
+          <AgentPrefix agent={currentThinking.agent} isActive />
+          <span className="text-gray-400 italic">
+            {currentThinking.thought || 'Processing...'}
+            {currentThinking.filePath && (
+              <span className="text-blue-400 ml-2">{currentThinking.filePath}</span>
+            )}
           </span>
-        </div>
-        {isExpanded ? (
-          <ChevronUp className="h-4 w-4 text-gray-500" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-gray-500" />
-        )}
-      </div>
-
-      {/* Conversation Thread */}
-      {isExpanded && (
-        <div
-          ref={containerRef}
-          className="overflow-y-auto p-3 space-y-3"
-          style={{ maxHeight }}
-        >
-          {entries.map((entry, index) => {
-            const animationClass = 'animate-slideIn';
-            const animationStyle = { animationDelay: `${Math.min(index * 30, 150)}ms` };
-
-            switch (entry.type) {
-              case 'message':
-                return (
-                  <div key={entry.id} className={animationClass} style={animationStyle}>
-                    <MessageComponent
-                      agent={entry.agentType || 'conductor'}
-                      message={entry.message || ''}
-                      messageType={entry.messageType as any}
-                      toAgent={entry.toAgentType}
-                      timestamp={showTimestamps ? entry.timestamp : undefined}
-                    />
-                  </div>
-                );
-
-              case 'handoff':
-                return (
-                  <div key={entry.id} className={animationClass} style={animationStyle}>
-                    <AgentHandoffMessage
-                      fromAgent={entry.agentType || 'conductor'}
-                      toAgent={entry.toAgentType || 'conductor'}
-                      message={entry.message}
-                    />
-                  </div>
-                );
-
-              case 'thinking':
-                return compact ? (
-                  <div key={entry.id} className={animationClass} style={animationStyle}>
-                    <AgentThinkingCompact
-                      agent={entry.agentType || 'conductor'}
-                      thought={entry.thought}
-                    />
-                  </div>
-                ) : (
-                  <div key={entry.id} className={animationClass} style={animationStyle}>
-                    <AgentThinking
-                      agent={entry.agentType || 'conductor'}
-                      thought={entry.thought}
-                      actionType={entry.actionType}
-                      filePath={entry.filePath}
-                      progress={entry.progress}
-                      rotateMessages={false}
-                    />
-                  </div>
-                );
-
-              case 'system':
-                return (
-                  <div key={entry.id} className={entry.systemType === 'success' ? 'animate-success' : animationClass} style={animationStyle}>
-                    <SystemMessage
-                      message={entry.message || ''}
-                      type={entry.systemType || 'info'}
-                    />
-                  </div>
-                );
-
-              default:
-                return null;
-            }
-          })}
-
-          {/* Current thinking state */}
-          {currentThinking && (
-            <div className="animate-fadeIn">
-              {compact ? (
-                <AgentThinkingCompact
-                  agent={currentThinking.agent}
-                  thought={currentThinking.thought}
-                />
-              ) : (
-                <AgentThinking
-                  agent={currentThinking.agent}
-                  thought={currentThinking.thought}
-                  actionType={currentThinking.actionType}
-                  filePath={currentThinking.filePath}
-                  progress={currentThinking.progress}
-                  rotateMessages
-                />
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -280,15 +269,35 @@ export function useAgentConversation() {
       case 'step_started':
         setCurrentThinking({
           agent: getAgentInfo('forge'),
-          thought: `Working on: ${data.step?.description || 'step'}`,
+          thought: data.step?.description || 'Working on step...',
           actionType: data.step?.action,
           filePath: data.step?.file,
           progress: 0,
+        });
+        addEntry({
+          type: 'step',
+          timestamp,
+          agentType: 'forge',
+          actionType: data.step?.action,
+          filePath: data.step?.file,
+          message: data.step?.description,
+          completed: false,
         });
         break;
 
       case 'step_completed':
         setCurrentThinking(null);
+        // Mark the last step entry as completed
+        setEntries((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].type === 'step' && !updated[i].completed) {
+              updated[i] = { ...updated[i], completed: true };
+              break;
+            }
+          }
+          return updated;
+        });
         break;
 
       case 'plan_ready':

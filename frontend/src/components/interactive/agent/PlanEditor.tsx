@@ -7,15 +7,11 @@ import {
   Edit2,
   Plus,
   Trash2,
-  GripVertical,
   ChevronDown,
   ChevronUp,
   RefreshCw,
-  AlertCircle,
-  FileCode,
-  FilePlus,
-  FileX,
-  Save,
+  ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Plan, PlanStep } from './types';
@@ -29,29 +25,11 @@ interface PlanEditorProps {
   className?: string;
 }
 
-// Action type colors and icons
-const ACTION_STYLES = {
-  create: {
-    bg: 'bg-green-500/10',
-    border: 'border-green-500/30',
-    text: 'text-green-400',
-    icon: FilePlus,
-    label: 'Create',
-  },
-  modify: {
-    bg: 'bg-yellow-500/10',
-    border: 'border-yellow-500/30',
-    text: 'text-yellow-400',
-    icon: FileCode,
-    label: 'Modify',
-  },
-  delete: {
-    bg: 'bg-red-500/10',
-    border: 'border-red-500/30',
-    text: 'text-red-400',
-    icon: FileX,
-    label: 'Delete',
-  },
+// Action type colors
+const ACTION_COLORS = {
+  create: 'text-green-400',
+  modify: 'text-yellow-400',
+  delete: 'text-red-400',
 };
 
 export function PlanEditor({
@@ -65,10 +43,8 @@ export function PlanEditor({
   const [editedPlan, setEditedPlan] = useState<Plan>({ ...plan });
   const [isEditing, setIsEditing] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
-  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [regenerateInstructions, setRegenerateInstructions] = useState('');
-  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
 
   // Track if plan was modified
   const isModified = useMemo(() => {
@@ -102,40 +78,6 @@ export function PlanEditor({
     }));
   }, []);
 
-  // Add step
-  const addStep = useCallback((afterIndex: number) => {
-    const newStep: PlanStep = {
-      order: afterIndex + 2,
-      action: 'modify',
-      file: '',
-      description: '',
-    };
-    setEditedPlan((prev) => {
-      const steps = [...prev.steps];
-      steps.splice(afterIndex + 1, 0, newStep);
-      return {
-        ...prev,
-        steps: steps.map((step, i) => ({ ...step, order: i + 1 })),
-      };
-    });
-    setEditingStepIndex(afterIndex + 1);
-  }, []);
-
-  // Move step
-  const moveStep = useCallback((fromIndex: number, direction: 'up' | 'down') => {
-    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
-    if (toIndex < 0 || toIndex >= editedPlan.steps.length) return;
-
-    setEditedPlan((prev) => {
-      const steps = [...prev.steps];
-      [steps[fromIndex], steps[toIndex]] = [steps[toIndex], steps[fromIndex]];
-      return {
-        ...prev,
-        steps: steps.map((step, i) => ({ ...step, order: i + 1 })),
-      };
-    });
-  }, [editedPlan.steps.length]);
-
   // Handle approve
   const handleApprove = useCallback(() => {
     if (isModified) {
@@ -148,364 +90,173 @@ export function PlanEditor({
   // Handle reject
   const handleReject = useCallback(() => {
     onReject(rejectReason || undefined);
-    setShowRejectModal(false);
+    setShowRejectInput(false);
     setRejectReason('');
   }, [rejectReason, onReject]);
 
-  // Handle regenerate
-  const handleRegenerate = useCallback(() => {
-    onRegenerate?.(regenerateInstructions || undefined);
-    setShowRegenerateModal(false);
-    setRegenerateInstructions('');
-  }, [regenerateInstructions, onRegenerate]);
-
   return (
-    <div className={`rounded-lg border border-purple-500/30 bg-purple-500/5 overflow-hidden ${className}`}>
+    <div className={`font-mono text-sm ${className}`}>
       {/* Header */}
-      <div className="px-4 py-3 bg-purple-500/10 border-b border-purple-500/20">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">📋</span>
-            <h3 className="text-sm font-medium text-purple-300">Implementation Plan</h3>
-            <span className="text-xs text-gray-500">
-              {editedPlan.steps.length} {editedPlan.steps.length === 1 ? 'step' : 'steps'}
-            </span>
-            {isModified && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-                Modified
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {isEditing ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={resetPlan}
-                  disabled={isLoading}
+      <div className="flex items-center gap-2 text-purple-400 mb-2">
+        <ChevronRight className="h-4 w-4" />
+        <span className="font-semibold">Blueprint</span>
+        <span className="text-gray-500">- Implementation Plan</span>
+        {isModified && <span className="text-yellow-400 text-xs">(modified)</span>}
+      </div>
+
+      {/* Summary */}
+      <div className="text-gray-400 mb-3 pl-6">
+        {editedPlan.summary}
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-1 pl-4 mb-4">
+        {editedPlan.steps.map((step, index) => {
+          const actionColor = ACTION_COLORS[step.action] || 'text-gray-400';
+
+          if (editingStepIndex === index) {
+            return (
+              <div key={index} className="pl-2 py-2 border-l-2 border-purple-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <select
+                    value={step.action}
+                    onChange={(e) => updateStep(index, { action: e.target.value as PlanStep['action'] })}
+                    className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs"
+                  >
+                    <option value="create">create</option>
+                    <option value="modify">modify</option>
+                    <option value="delete">delete</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={step.file}
+                    onChange={(e) => updateStep(index, { file: e.target.value })}
+                    placeholder="file path"
+                    className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={step.description}
+                  onChange={(e) => updateStep(index, { description: e.target.value })}
+                  placeholder="description"
+                  className="w-full px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs mb-2"
+                />
+                <button
+                  onClick={() => setEditingStepIndex(null)}
+                  className="text-xs text-blue-400 hover:text-blue-300"
                 >
-                  <X className="h-4 w-4 mr-1" />
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => setIsEditing(false)}
-                  disabled={isLoading}
-                >
-                  <Save className="h-4 w-4 mr-1" />
                   Done
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsEditing(true)}
-                disabled={isLoading}
-              >
-                <Edit2 className="h-4 w-4 mr-1" />
-                Edit
-              </Button>
-            )}
-          </div>
-        </div>
+                </button>
+              </div>
+            );
+          }
 
-        {/* Summary */}
-        <p className="text-sm text-gray-400 mt-2">{editedPlan.summary}</p>
-      </div>
-
-      {/* Steps List */}
-      <div className="p-4 space-y-3">
-        {editedPlan.steps.map((step, index) => (
-          <PlanStepRow
-            key={`step-${index}`}
-            step={step}
-            index={index}
-            isEditing={isEditing}
-            isStepEditing={editingStepIndex === index}
-            onEdit={() => setEditingStepIndex(index)}
-            onSaveEdit={() => setEditingStepIndex(null)}
-            onUpdate={(updates) => updateStep(index, updates)}
-            onDelete={() => deleteStep(index)}
-            onMoveUp={() => moveStep(index, 'up')}
-            onMoveDown={() => moveStep(index, 'down')}
-            onAddAfter={() => addStep(index)}
-            canMoveUp={index > 0}
-            canMoveDown={index < editedPlan.steps.length - 1}
-            isLoading={isLoading}
-          />
-        ))}
-
-        {/* Add step button (when editing and no steps) */}
-        {isEditing && editedPlan.steps.length === 0 && (
-          <button
-            onClick={() => addStep(-1)}
-            className="w-full py-2 border border-dashed border-gray-600 rounded-lg text-gray-500 hover:border-gray-500 hover:text-gray-400 transition-colors text-sm"
-          >
-            <Plus className="h-4 w-4 inline mr-1" />
-            Add Step
-          </button>
-        )}
-      </div>
-
-      {/* Action Buttons */}
-      <div className="px-4 py-3 bg-gray-800/50 border-t border-gray-700/50">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {onRegenerate && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowRegenerateModal(true)}
-                disabled={isLoading}
-                className="text-gray-400 hover:text-gray-300"
-              >
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Regenerate
-              </Button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowRejectModal(true)}
-              disabled={isLoading}
-              className="text-red-400 hover:text-red-300"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Reject
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleApprove}
-              disabled={isLoading || editedPlan.steps.length === 0}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <Check className="h-4 w-4 mr-1" />
-              {isModified ? 'Approve Modified' : 'Approve Plan'}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Reject Modal */}
-      {showRejectModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 max-w-md w-full mx-4">
-            <h4 className="text-sm font-medium text-white mb-3">Reject Plan</h4>
-            <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Optional: Explain why you're rejecting this plan..."
-              className="w-full h-24 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-            <div className="flex justify-end gap-2 mt-3">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowRejectModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleReject}
-                className="bg-red-600 hover:bg-red-700"
-              >
-                Reject
-              </Button>
+          return (
+            <div key={index} className="flex items-start gap-2 group">
+              <span className="text-gray-600 w-4">{step.order}.</span>
+              <span className={`${actionColor} w-14`}>[{step.action}]</span>
+              <span className="text-blue-400">{step.file}</span>
+              {step.description && (
+                <span className="text-gray-500">- {step.description}</span>
+              )}
+              {isEditing && (
+                <div className="hidden group-hover:flex items-center gap-1 ml-2">
+                  <button
+                    onClick={() => setEditingStepIndex(index)}
+                    className="text-gray-600 hover:text-blue-400"
+                  >
+                    <Edit2 className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => deleteStep(index)}
+                    className="text-gray-600 hover:text-red-400"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
-      )}
+          );
+        })}
+      </div>
 
-      {/* Regenerate Modal */}
-      {showRegenerateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 max-w-md w-full mx-4">
-            <h4 className="text-sm font-medium text-white mb-3">Regenerate Plan</h4>
-            <textarea
-              value={regenerateInstructions}
-              onChange={(e) => setRegenerateInstructions(e.target.value)}
-              placeholder="Optional: Provide additional instructions for the new plan..."
-              className="w-full h-24 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-            <div className="flex justify-end gap-2 mt-3">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowRegenerateModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleRegenerate}
-              >
-                Regenerate
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Individual plan step row component
-function PlanStepRow({
-  step,
-  index,
-  isEditing,
-  isStepEditing,
-  onEdit,
-  onSaveEdit,
-  onUpdate,
-  onDelete,
-  onMoveUp,
-  onMoveDown,
-  onAddAfter,
-  canMoveUp,
-  canMoveDown,
-  isLoading,
-}: {
-  step: PlanStep;
-  index: number;
-  isEditing: boolean;
-  isStepEditing: boolean;
-  onEdit: () => void;
-  onSaveEdit: () => void;
-  onUpdate: (updates: Partial<PlanStep>) => void;
-  onDelete: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onAddAfter: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  isLoading: boolean;
-}) {
-  const style = ACTION_STYLES[step.action] || ACTION_STYLES.modify;
-  const IconComponent = style.icon;
-
-  if (isStepEditing) {
-    return (
-      <div className={`p-3 rounded-lg border-2 ${style.border} ${style.bg}`}>
-        <div className="space-y-2">
-          {/* Action selector */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-400">Action:</label>
-            <select
-              value={step.action}
-              onChange={(e) => onUpdate({ action: e.target.value as PlanStep['action'] })}
-              className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white"
-            >
-              <option value="create">Create</option>
-              <option value="modify">Modify</option>
-              <option value="delete">Delete</option>
-            </select>
-          </div>
-
-          {/* File path */}
+      {/* Reject reason input */}
+      {showRejectInput && (
+        <div className="pl-6 mb-4">
           <input
             type="text"
-            value={step.file}
-            onChange={(e) => onUpdate({ file: e.target.value })}
-            placeholder="File path..."
-            className="w-full px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Reason for rejection (optional)..."
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm mb-2"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleReject();
+              if (e.key === 'Escape') setShowRejectInput(false);
+            }}
+            autoFocus
           />
-
-          {/* Description */}
-          <textarea
-            value={step.description}
-            onChange={(e) => onUpdate({ description: e.target.value })}
-            placeholder="Description..."
-            className="w-full px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white h-16 resize-none"
-          />
-
-          {/* Save button */}
-          <div className="flex justify-end">
-            <Button size="sm" onClick={onSaveEdit}>
-              Done
-            </Button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleReject}
+              className="text-xs text-red-400 hover:text-red-300"
+            >
+              Confirm Reject
+            </button>
+            <button
+              onClick={() => setShowRejectInput(false)}
+              className="text-xs text-gray-500 hover:text-gray-400"
+            >
+              Cancel
+            </button>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`flex items-start gap-3 p-3 rounded-lg border ${style.border} ${style.bg}`}>
-      {/* Drag handle (when editing) */}
-      {isEditing && (
-        <div className="flex flex-col gap-0.5 pt-1">
-          <button
-            onClick={onMoveUp}
-            disabled={!canMoveUp || isLoading}
-            className="text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </button>
-          <button
-            onClick={onMoveDown}
-            disabled={!canMoveDown || isLoading}
-            className="text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
         </div>
       )}
 
-      {/* Step number */}
-      <span className="text-xs text-gray-500 font-mono w-5 pt-1">
-        {step.order}.
-      </span>
-
-      {/* Action badge */}
-      <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${style.bg} ${style.text}`}>
-        <IconComponent className="h-3 w-3" />
-        {style.label}
-      </span>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="font-mono text-xs text-gray-300 truncate">
-          {step.file || '(no file specified)'}
-        </div>
-        <p className="text-sm text-gray-400 mt-0.5">
-          {step.description || '(no description)'}
-        </p>
-      </div>
-
-      {/* Edit/Delete buttons (when editing) */}
-      {isEditing && (
-        <div className="flex items-center gap-1">
+      {/* Action buttons */}
+      {!showRejectInput && (
+        <div className="flex items-center gap-4 pl-6">
           <button
-            onClick={onAddAfter}
-            disabled={isLoading}
-            className="p-1 text-gray-500 hover:text-green-400 transition-colors"
-            title="Add step after"
+            onClick={handleApprove}
+            disabled={isLoading || editedPlan.steps.length === 0}
+            className="flex items-center gap-1 text-green-400 hover:text-green-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Plus className="h-4 w-4" />
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
+            <span>{isModified ? 'approve (modified)' : 'approve'}</span>
           </button>
+
           <button
-            onClick={onEdit}
+            onClick={() => setShowRejectInput(true)}
             disabled={isLoading}
-            className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
-            title="Edit step"
+            className="flex items-center gap-1 text-red-400 hover:text-red-300 disabled:opacity-50"
+          >
+            <X className="h-4 w-4" />
+            <span>reject</span>
+          </button>
+
+          <button
+            onClick={() => setIsEditing(!isEditing)}
+            disabled={isLoading}
+            className="flex items-center gap-1 text-gray-400 hover:text-gray-300 disabled:opacity-50"
           >
             <Edit2 className="h-4 w-4" />
+            <span>{isEditing ? 'done editing' : 'edit'}</span>
           </button>
-          <button
-            onClick={onDelete}
-            disabled={isLoading}
-            className="p-1 text-gray-500 hover:text-red-400 transition-colors"
-            title="Delete step"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+
+          {isModified && (
+            <button
+              onClick={resetPlan}
+              disabled={isLoading}
+              className="flex items-center gap-1 text-gray-500 hover:text-gray-400 disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              <span>reset</span>
+            </button>
+          )}
         </div>
       )}
     </div>

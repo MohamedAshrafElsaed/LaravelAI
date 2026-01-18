@@ -427,15 +427,15 @@ export function InteractiveChat({
           </div>
         )}
 
-        {/* Agent Conversation Thread */}
+        {/* Agent Activity - CLI Style (inline, no box) */}
         {(isLoading || conversationEntries.length > 0) && (
-          <AgentConversation
-            entries={conversationEntries}
-            currentThinking={currentThinking}
-            autoScroll={true}
-            maxHeight="300px"
-            compact={false}
-          />
+          <div className="bg-gray-950 rounded-lg p-4 border border-gray-800">
+            <AgentConversation
+              entries={conversationEntries}
+              currentThinking={currentThinking}
+              autoScroll={true}
+            />
+          </div>
         )}
 
         {/* Plan Approval Gateway */}
