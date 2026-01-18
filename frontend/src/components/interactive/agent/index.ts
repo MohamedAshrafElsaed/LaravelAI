@@ -25,6 +25,7 @@ export {
 export {
   default as AgentConversation,
   useAgentConversation,
+  eventsToConversationEntries,
   type ConversationEntry,
 } from './AgentConversation';
 export { default as PlanEditor } from './PlanEditor';

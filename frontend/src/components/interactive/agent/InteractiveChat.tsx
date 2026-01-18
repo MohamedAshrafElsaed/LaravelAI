@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, Loader2, RefreshCw, Settings, History } from 'lucide-react';
+import { Send, Loader2, FileCode, Check, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/Button';
@@ -10,11 +10,8 @@ import { useToast } from '@/components/Toast';
 import {
   AgentConversation,
   useAgentConversation,
-  AgentAvatar,
-  AgentThinking,
   PlanEditor,
   ValidationResultDisplay,
-  ScoreReveal,
 } from './index';
 import {
   AgentInfo,
@@ -26,6 +23,15 @@ import {
   getAgentInfo,
   DEFAULT_AGENTS,
 } from './types';
+import { ConversationEntry, eventsToConversationEntries } from './AgentConversation';
+
+interface ExecutionResult {
+  action: string;
+  file: string;
+  success: boolean;
+  description?: string;
+  error?: string;
+}
 
 interface Message {
   id: string;
@@ -35,12 +41,13 @@ interface Message {
   processingData?: {
     intent?: any;
     plan?: any;
-    execution_results?: any[];
+    execution_results?: ExecutionResult[];
     validation?: any;
     events?: any[];
     success?: boolean;
     error?: string;
     agent_timeline?: AgentTimeline;
+    agent_activity?: ConversationEntry[];
   };
 }
 
@@ -50,6 +57,51 @@ interface InteractiveChatProps {
   onConversationChange?: (id: string | null) => void;
   requirePlanApproval?: boolean;
   className?: string;
+}
+
+// Files Changed Display Component
+function FilesChanged({ results }: { results: ExecutionResult[] }) {
+  if (!results || results.length === 0) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-700">
+      <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
+        <FileCode className="h-4 w-4" />
+        <span>Files Changed ({results.length})</span>
+      </div>
+      <div className="font-mono text-xs space-y-1">
+        {results.map((result, index) => {
+          const actionColor =
+            result.action === 'create' ? 'text-green-400' :
+            result.action === 'delete' ? 'text-red-400' :
+            'text-yellow-400';
+
+          return (
+            <div key={index} className="flex items-center gap-2">
+              {result.success ? (
+                <Check className="h-3 w-3 text-green-400" />
+              ) : (
+                <span className="text-red-400">✗</span>
+              )}
+              <span className={actionColor}>[{result.action}]</span>
+              <span className="text-blue-400">{result.file}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Stored Activity Display - for displaying persisted conversation entries
+function StoredActivityDisplay({ entries }: { entries: ConversationEntry[] }) {
+  if (!entries || entries.length === 0) return null;
+
+  return (
+    <div className="bg-gray-950 rounded-lg p-4 border border-gray-800 mb-4">
+      <AgentConversation entries={entries} autoScroll={false} />
+    </div>
+  );
 }
 
 export function InteractiveChat({
@@ -71,6 +123,7 @@ export function InteractiveChat({
   const [streamingContent, setStreamingContent] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId || null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
   // Agent conversation state
   const {
@@ -79,6 +132,7 @@ export function InteractiveChat({
     processEvent,
     clearEntries,
     setCurrentThinking,
+    addEntry,
   } = useAgentConversation();
 
   // Plan approval state
@@ -92,8 +146,11 @@ export function InteractiveChat({
   // Agent timeline
   const [agentTimeline, setAgentTimeline] = useState<AgentTimeline | null>(null);
 
-  // Agents info (from connected event)
+  // Agents info
   const [agents, setAgents] = useState<AgentInfo[]>(Object.values(DEFAULT_AGENTS));
+
+  // Processing state key for localStorage
+  const processingStateKey = `chat_processing_${projectId}`;
 
   // Auto-scroll
   const scrollToBottom = useCallback(() => {
@@ -104,24 +161,86 @@ export function InteractiveChat({
     scrollToBottom();
   }, [messages, streamingContent, conversationEntries, scrollToBottom]);
 
+  // Load saved conversation on mount
+  useEffect(() => {
+    const savedConvId = localStorage.getItem(`conversation_${projectId}`);
+    if (savedConvId) {
+      loadMessages(savedConvId);
+    }
+  }, [projectId]);
+
+  // Check for in-progress processing state on mount
+  useEffect(() => {
+    const processingState = localStorage.getItem(processingStateKey);
+    if (processingState) {
+      try {
+        const state = JSON.parse(processingState);
+        // If there's an active processing state, try to restore it
+        if (state.isLoading && state.conversationId) {
+          setConversationId(state.conversationId);
+          setIsLoading(true);
+          // Try to reconnect or load current state
+          loadMessages(state.conversationId);
+        }
+      } catch (e) {
+        localStorage.removeItem(processingStateKey);
+      }
+    }
+  }, [processingStateKey]);
+
+  // Save processing state
+  const saveProcessingState = useCallback((isProcessing: boolean, convId: string | null) => {
+    if (isProcessing && convId) {
+      localStorage.setItem(processingStateKey, JSON.stringify({
+        isLoading: true,
+        conversationId: convId,
+        timestamp: Date.now(),
+      }));
+    } else {
+      localStorage.removeItem(processingStateKey);
+    }
+  }, [processingStateKey]);
+
   // Load conversation messages
   const loadMessages = useCallback(async (convId: string) => {
+    setIsLoadingMessages(true);
     try {
       const response = await chatApi.getMessages(projectId, convId);
-      const loadedMessages: Message[] = response.data.map((msg: any) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: new Date(msg.created_at),
-        processingData: msg.processing_data,
-      }));
+      const loadedMessages: Message[] = response.data.map((msg: any) => {
+        const processingData = msg.processing_data || {};
+
+        // Convert stored events to conversation entries if available
+        // This allows us to display the agent activity from stored data
+        let agentActivity: ConversationEntry[] = [];
+        if (processingData.events && Array.isArray(processingData.events)) {
+          agentActivity = eventsToConversationEntries(processingData.events);
+        }
+
+        return {
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date(msg.created_at),
+          processingData: {
+            ...processingData,
+            agent_activity: agentActivity,
+          },
+        };
+      });
       setMessages(loadedMessages);
       setConversationId(convId);
+      onConversationChange?.(convId);
+      localStorage.setItem(`conversation_${projectId}`, convId);
+
+      // Clear any stale processing state if we loaded completed messages
+      saveProcessingState(false, null);
     } catch (err) {
       console.error('Failed to load messages:', err);
       toast.error('Failed to load messages', getErrorMessage(err));
+    } finally {
+      setIsLoadingMessages(false);
     }
-  }, [projectId, toast]);
+  }, [projectId, toast, onConversationChange, saveProcessingState]);
 
   // Handle SSE events
   const handleEvent = useCallback((event: InteractiveEvent) => {
@@ -135,6 +254,8 @@ export function InteractiveChat({
         if (data.conversation_id) {
           setConversationId(data.conversation_id);
           onConversationChange?.(data.conversation_id);
+          localStorage.setItem(`conversation_${projectId}`, data.conversation_id);
+          saveProcessingState(true, data.conversation_id);
         }
         if (data.agents) {
           setAgents(data.agents);
@@ -172,12 +293,13 @@ export function InteractiveChat({
         setCurrentThinking(null);
         setAwaitingPlanApproval(false);
         setCurrentPlan(null);
+        saveProcessingState(false, null);
 
         if (data.agent_timeline) {
           setAgentTimeline(data.agent_timeline);
         }
 
-        // Add assistant message
+        // Add assistant message with stored activity
         if (data.answer || data.success) {
           const assistantMessage: Message = {
             id: `msg-${Date.now()}`,
@@ -192,6 +314,8 @@ export function InteractiveChat({
               success: data.success,
               error: data.error,
               agent_timeline: data.agent_timeline,
+              // Store current conversation entries for persistence
+              agent_activity: [...conversationEntries],
             },
           };
           setMessages((prev) => [...prev, assistantMessage]);
@@ -204,15 +328,15 @@ export function InteractiveChat({
         setIsStreaming(false);
         setIsLoading(false);
         setCurrentThinking(null);
+        saveProcessingState(false, null);
         setError(data.message || 'An error occurred');
         toast.error('Error', data.message || 'An error occurred');
         break;
 
       default:
-        // Handle in conversation thread
         break;
     }
-  }, [processEvent, onConversationChange, setCurrentThinking, toast]);
+  }, [processEvent, onConversationChange, setCurrentThinking, toast, projectId, saveProcessingState, conversationEntries]);
 
   // Parse SSE chunk
   const parseSSEChunk = useCallback((chunk: string): InteractiveEvent[] => {
@@ -261,7 +385,6 @@ export function InteractiveChat({
     setMessages((prev) => [...prev, newUserMessage]);
 
     try {
-      // Use interactive mode
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/projects/${projectId}/chat`, {
         method: 'POST',
         headers: {
@@ -317,11 +440,12 @@ export function InteractiveChat({
       console.error('Chat error:', err);
       setIsStreaming(false);
       setIsLoading(false);
+      saveProcessingState(false, null);
       const message = getErrorMessage(err);
       setError(message);
       toast.error('Failed to send message', message);
     }
-  }, [input, isLoading, projectId, conversationId, requirePlanApproval, clearEntries, parseSSEChunk, handleEvent, toast]);
+  }, [input, isLoading, projectId, conversationId, requirePlanApproval, clearEntries, parseSSEChunk, handleEvent, toast, saveProcessingState]);
 
   // Handle plan approval
   const handlePlanApproval = useCallback(async (plan?: Plan) => {
@@ -359,13 +483,14 @@ export function InteractiveChat({
       setCurrentPlan(null);
       setIsLoading(false);
       setIsStreaming(false);
+      saveProcessingState(false, null);
     } catch (err) {
       console.error('Plan rejection error:', err);
       toast.error('Failed to reject plan', getErrorMessage(err));
     } finally {
       setIsPlanApprovalLoading(false);
     }
-  }, [conversationId, projectId, toast]);
+  }, [conversationId, projectId, toast, saveProcessingState]);
 
   // Handle key press
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
@@ -379,37 +504,66 @@ export function InteractiveChat({
     <div className={`flex flex-col h-full bg-gray-900 ${className}`}>
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Loading messages indicator */}
+        {isLoadingMessages && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+            <span className="ml-2 text-gray-500">Loading messages...</span>
+          </div>
+        )}
+
         {/* Messages */}
         {messages.map((message, index) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slideIn`}
-            style={{ animationDelay: `${Math.min(index * 50, 300)}ms` }}
-          >
-            <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                message.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-100'
-              }`}
-            >
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
-                </ReactMarkdown>
-              </div>
-
-              {/* Show validation result for assistant messages */}
-              {message.role === 'assistant' && message.processingData?.validation && (
-                <div className="mt-3 pt-3 border-t border-gray-700">
-                  <ValidationResultDisplay
-                    validation={message.processingData.validation}
-                    animated={false}
-                    showIssues={true}
-                  />
+          <div key={message.id}>
+            {/* User message */}
+            {message.role === 'user' && (
+              <div className="flex justify-end animate-slideIn">
+                <div className="max-w-[80%] rounded-lg px-4 py-2 bg-blue-600 text-white">
+                  <div className="prose prose-invert prose-sm max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Assistant message */}
+            {message.role === 'assistant' && (
+              <div className="space-y-2">
+                {/* Show stored agent activity if available */}
+                {message.processingData?.agent_activity && message.processingData.agent_activity.length > 0 && (
+                  <StoredActivityDisplay entries={message.processingData.agent_activity} />
+                )}
+
+                {/* Message content */}
+                <div className="flex justify-start animate-slideIn">
+                  <div className="max-w-[80%] rounded-lg px-4 py-2 bg-gray-800 text-gray-100">
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+
+                    {/* Files changed */}
+                    {message.processingData?.execution_results && (
+                      <FilesChanged results={message.processingData.execution_results} />
+                    )}
+
+                    {/* Validation result */}
+                    {message.processingData?.validation && (
+                      <div className="mt-3 pt-3 border-t border-gray-700">
+                        <ValidationResultDisplay
+                          validation={message.processingData.validation}
+                          animated={false}
+                          showIssues={true}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
 
@@ -427,8 +581,8 @@ export function InteractiveChat({
           </div>
         )}
 
-        {/* Agent Activity - CLI Style (inline, no box) */}
-        {(isLoading || conversationEntries.length > 0) && (
+        {/* Agent Activity - CLI Style (current processing) */}
+        {(isLoading || conversationEntries.length > 0) && !isLoadingMessages && (
           <div className="bg-gray-950 rounded-lg p-4 border border-gray-800">
             <AgentConversation
               entries={conversationEntries}

@@ -378,3 +378,153 @@ export function useAgentConversation() {
 }
 
 export default AgentConversation;
+
+// Utility function to convert stored orchestrator events to ConversationEntry format
+// This is used when loading messages from the database that have processing_data.events
+export function eventsToConversationEntries(events: any[]): ConversationEntry[] {
+  if (!events || !Array.isArray(events)) return [];
+
+  const entries: ConversationEntry[] = [];
+  let entryId = 0;
+
+  for (const event of events) {
+    const id = `stored-${entryId++}`;
+    const timestamp = event.timestamp || new Date().toISOString();
+    const phase = event.phase;
+    const data = event.data || {};
+
+    // Map orchestrator phases to conversation entries
+    if (phase === 'analyzing') {
+      if (data.intent) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'nova',
+          message: event.message || `Analyzed intent: ${data.intent.task_type || 'unknown'}`,
+          messageType: 'completion',
+        });
+      } else if (event.message) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'nova',
+          message: event.message,
+          messageType: 'greeting',
+        });
+      }
+    } else if (phase === 'retrieving') {
+      if (data.chunks_count !== undefined) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'scout',
+          message: `Found ${data.chunks_count} relevant code sections`,
+          messageType: 'completion',
+        });
+      } else if (event.message) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'scout',
+          message: event.message,
+          messageType: 'greeting',
+        });
+      }
+    } else if (phase === 'planning') {
+      if (data.plan) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'blueprint',
+          message: `Created ${data.plan.steps?.length || 0}-step plan: ${data.plan.summary || 'Implementation ready'}`,
+          messageType: 'completion',
+        });
+      } else if (event.message) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'blueprint',
+          message: event.message,
+          messageType: 'greeting',
+        });
+      }
+    } else if (phase === 'executing') {
+      if (data.step) {
+        const step = data.step;
+        const stepStatus = data.step_status;
+        entries.push({
+          id,
+          type: 'step',
+          timestamp,
+          agentType: 'forge',
+          actionType: step.action,
+          filePath: step.file,
+          message: step.description,
+          completed: stepStatus === 'completed',
+        });
+      } else if (event.message) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'forge',
+          message: event.message,
+          messageType: 'greeting',
+        });
+      }
+    } else if (phase === 'validating') {
+      if (data.validation) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'guardian',
+          message: `Validation complete: score ${data.validation.score}/100`,
+          messageType: 'completion',
+        });
+      } else if (event.message) {
+        entries.push({
+          id,
+          type: 'message',
+          timestamp,
+          agentType: 'guardian',
+          message: event.message,
+          messageType: 'greeting',
+        });
+      }
+    } else if (phase === 'fixing') {
+      entries.push({
+        id,
+        type: 'message',
+        timestamp,
+        agentType: 'guardian',
+        message: event.message || 'Attempting auto-fix...',
+        messageType: 'custom',
+      });
+    } else if (phase === 'completed') {
+      entries.push({
+        id,
+        type: 'system',
+        timestamp,
+        message: 'Task completed successfully',
+        systemType: 'success',
+      });
+    } else if (phase === 'failed') {
+      entries.push({
+        id,
+        type: 'system',
+        timestamp,
+        message: event.message || 'Task failed',
+        systemType: 'error',
+      });
+    }
+  }
+
+  return entries;
+}
