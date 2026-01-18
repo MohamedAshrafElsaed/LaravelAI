@@ -1,7 +1,9 @@
 'use client';
 
-import { Sparkles } from 'lucide-react';
-import InteractiveChat from './interactive/agent/InteractiveChat';
+import { useRef } from 'react';
+import { Sparkles, Plus } from 'lucide-react';
+import { InteractiveChat, type InteractiveChatRef } from './interactive/agent';
+import { Button } from '@/components/ui/Button';
 
 interface ChatProps {
   projectId: string;
@@ -13,6 +15,12 @@ export function Chat({
   projectId,
   onConversationChange,
 }: ChatProps) {
+  const chatRef = useRef<InteractiveChatRef>(null);
+
+  const handleNewChat = () => {
+    chatRef.current?.startNewChat();
+  };
+
   return (
     <div className="flex h-full flex-col bg-gray-950">
       {/* Header */}
@@ -23,11 +31,21 @@ export function Chat({
             <span className="hidden sm:inline">Multi-Agent Mode</span>
           </span>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleNewChat}
+          className="flex items-center gap-1.5 text-gray-400 hover:text-white"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">New Chat</span>
+        </Button>
       </div>
 
       {/* Interactive Chat Component */}
       <div className="flex-1 overflow-hidden">
         <InteractiveChat
+          ref={chatRef}
           projectId={projectId}
           onConversationChange={onConversationChange}
         />

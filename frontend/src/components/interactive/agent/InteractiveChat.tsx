@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Send, Loader2, FileCode, Check, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -59,6 +59,11 @@ interface InteractiveChatProps {
   className?: string;
 }
 
+// Ref interface for exposing methods to parent
+export interface InteractiveChatRef {
+  startNewChat: () => void;
+}
+
 // Files Changed Display Component
 function FilesChanged({ results }: { results: ExecutionResult[] }) {
   if (!results || results.length === 0) return null;
@@ -104,16 +109,19 @@ function StoredActivityDisplay({ entries }: { entries: ConversationEntry[] }) {
   );
 }
 
-export function InteractiveChat({
+export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatProps>(function InteractiveChat({
   projectId,
   conversationId: initialConversationId,
   onConversationChange,
   requirePlanApproval = true,
   className = '',
-}: InteractiveChatProps) {
+}, ref) {
   const toast = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // SSR hydration handling - only access localStorage after mount
+  const [mounted, setMounted] = useState(false);
 
   // State
   const [messages, setMessages] = useState<Message[]>([]);
@@ -124,6 +132,7 @@ export function InteractiveChat({
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId || null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [authToken, setAuthToken] = useState<string>('');
 
   // Agent conversation state
   const {
@@ -161,16 +170,24 @@ export function InteractiveChat({
     scrollToBottom();
   }, [messages, streamingContent, conversationEntries, scrollToBottom]);
 
-  // Load saved conversation on mount
+  // Mark component as mounted (client-side only) and load auth token
   useEffect(() => {
+    setMounted(true);
+    setAuthToken(localStorage.getItem('auth_token') || '');
+  }, []);
+
+  // Load saved conversation on mount - only after component is mounted (client-side)
+  useEffect(() => {
+    if (!mounted) return;
     const savedConvId = localStorage.getItem(`conversation_${projectId}`);
     if (savedConvId) {
       loadMessages(savedConvId);
     }
-  }, [projectId]);
+  }, [projectId, mounted]);
 
-  // Check for in-progress processing state on mount
+  // Check for in-progress processing state on mount - only after component is mounted
   useEffect(() => {
+    if (!mounted) return;
     const processingState = localStorage.getItem(processingStateKey);
     if (processingState) {
       try {
@@ -186,7 +203,35 @@ export function InteractiveChat({
         localStorage.removeItem(processingStateKey);
       }
     }
-  }, [processingStateKey]);
+  }, [processingStateKey, mounted]);
+
+  // Start new chat function - clears all state and starts fresh
+  const startNewChat = useCallback(() => {
+    setMessages([]);
+    setConversationId(null);
+    setInput('');
+    setIsLoading(false);
+    setIsStreaming(false);
+    setStreamingContent('');
+    setError(null);
+    setAwaitingPlanApproval(false);
+    setCurrentPlan(null);
+    setValidationResult(null);
+    setAgentTimeline(null);
+    clearEntries();
+
+    // Clear localStorage
+    localStorage.removeItem(`conversation_${projectId}`);
+    localStorage.removeItem(processingStateKey);
+
+    onConversationChange?.(null);
+    inputRef.current?.focus();
+  }, [projectId, processingStateKey, clearEntries, onConversationChange]);
+
+  // Expose startNewChat to parent via ref
+  useImperativeHandle(ref, () => ({
+    startNewChat,
+  }), [startNewChat]);
 
   // Save processing state
   const saveProcessingState = useCallback((isProcessing: boolean, convId: string | null) => {
@@ -389,7 +434,7 @@ export function InteractiveChat({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`,
+          'Authorization': `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           message: userMessage,
@@ -445,7 +490,7 @@ export function InteractiveChat({
       setError(message);
       toast.error('Failed to send message', message);
     }
-  }, [input, isLoading, projectId, conversationId, requirePlanApproval, clearEntries, parseSSEChunk, handleEvent, toast, saveProcessingState]);
+  }, [input, isLoading, projectId, conversationId, requirePlanApproval, clearEntries, parseSSEChunk, handleEvent, toast, saveProcessingState, authToken]);
 
   // Handle plan approval
   const handlePlanApproval = useCallback(async (plan?: Plan) => {
@@ -656,6 +701,6 @@ export function InteractiveChat({
       </div>
     </div>
   );
-}
+});
 
 export default InteractiveChat;

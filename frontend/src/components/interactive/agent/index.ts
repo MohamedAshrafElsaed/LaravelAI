@@ -36,5 +36,5 @@ export {
   ScoreReveal,
   ValidationResultDisplay,
 } from './ValidationDisplay';
-export { default as InteractiveChat } from './InteractiveChat';
+export { default as InteractiveChat, type InteractiveChatRef } from './InteractiveChat';
 export { default as TaskSummary } from './TaskSummary';
