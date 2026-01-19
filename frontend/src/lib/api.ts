@@ -232,13 +232,35 @@ export const authApi = {
     getMe: () => api.get('/auth/me'),
 };
 
+export interface FileNode {
+    name: string;
+    path: string;
+    type: 'file' | 'directory';
+    children?: FileNode[];
+    indexed?: boolean;
+}
+
+export interface FileContentResponse {
+    path: string;
+    content: string;
+    indexed: boolean;
+}
+
+export const filesApi = {
+    // Get file tree for a project
+    getFileTree: (projectId: string) => api.get(`/projects/${projectId}/files`),
+
+    // Get file content
+    getFileContent: (projectId: string, filePath: string) => api.get(`/projects/${projectId}/files/${encodeURIComponent(filePath)}`),
+};
+
+
 export const projectsApi = {
     // List all projects
     list: () => api.get('/projects'),
 
     // Create new project (connect repo)
-    create: (githubRepoId: number) =>
-        api.post('/projects', {github_repo_id: githubRepoId}),
+    create: (githubRepoId: number) => api.post('/projects', {github_repo_id: githubRepoId}),
 
     // Get single project
     get: (id: string) => api.get(`/projects/${id}`),

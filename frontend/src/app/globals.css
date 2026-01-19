@@ -247,3 +247,259 @@ pre, code {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
 }
+
+/* ============================================
+   CODE VIEWER & PRISM.JS STYLES
+   Add this to your globals.css
+   ============================================ */
+
+/* Code viewer container */
+.code-viewer {
+    --code-bg: var(--color-bg-primary);
+    --code-text: var(--color-text-primary);
+    --code-comment: #6b7280;
+    --code-keyword: #c084fc;
+    --code-string: #4ade80;
+    --code-number: #fb923c;
+    --code-function: #60a5fa;
+    --code-variable: #38bdf8;
+    --code-operator: #f472b6;
+    --code-class: #fbbf24;
+    --code-property: #a5b4fc;
+    --code-tag: #f87171;
+    --code-attr-name: #fbbf24;
+    --code-attr-value: #4ade80;
+    --code-punctuation: #9ca3af;
+}
+
+/* Override Prism theme for dark mode */
+.code-viewer pre[class*="language-"],
+.code-viewer code[class*="language-"] {
+    background: transparent !important;
+    color: var(--code-text) !important;
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', 'Monaco', monospace !important;
+    font-size: 0.875rem !important;
+    line-height: 1.5rem !important;
+    text-shadow: none !important;
+    white-space: pre !important;
+    word-spacing: normal !important;
+    word-break: normal !important;
+    word-wrap: normal !important;
+    tab-size: 4 !important;
+    hyphens: none !important;
+}
+
+.code-viewer pre[class*="language-"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: auto !important;
+}
+
+/* Token colors - PHP, JS, TS, etc. */
+.code-viewer .token.comment,
+.code-viewer .token.prolog,
+.code-viewer .token.doctype,
+.code-viewer .token.cdata {
+    color: var(--code-comment) !important;
+    font-style: italic;
+}
+
+.code-viewer .token.punctuation {
+    color: var(--code-punctuation) !important;
+}
+
+.code-viewer .token.namespace {
+    opacity: 0.8;
+}
+
+.code-viewer .token.property,
+.code-viewer .token.tag,
+.code-viewer .token.constant,
+.code-viewer .token.symbol,
+.code-viewer .token.deleted {
+    color: var(--code-tag) !important;
+}
+
+.code-viewer .token.boolean,
+.code-viewer .token.number {
+    color: var(--code-number) !important;
+}
+
+.code-viewer .token.selector,
+.code-viewer .token.attr-name,
+.code-viewer .token.string,
+.code-viewer .token.char,
+.code-viewer .token.builtin,
+.code-viewer .token.inserted {
+    color: var(--code-string) !important;
+}
+
+.code-viewer .token.operator,
+.code-viewer .token.entity,
+.code-viewer .token.url,
+.code-viewer .language-css .token.string,
+.code-viewer .style .token.string {
+    color: var(--code-operator) !important;
+}
+
+.code-viewer .token.atrule,
+.code-viewer .token.attr-value,
+.code-viewer .token.keyword {
+    color: var(--code-keyword) !important;
+}
+
+.code-viewer .token.function,
+.code-viewer .token.class-name {
+    color: var(--code-function) !important;
+}
+
+.code-viewer .token.regex,
+.code-viewer .token.important,
+.code-viewer .token.variable {
+    color: var(--code-variable) !important;
+}
+
+.code-viewer .token.important,
+.code-viewer .token.bold {
+    font-weight: bold;
+}
+
+.code-viewer .token.italic {
+    font-style: italic;
+}
+
+.code-viewer .token.entity {
+    cursor: help;
+}
+
+/* PHP specific tokens */
+.code-viewer .token.delimiter.important {
+    color: var(--code-tag) !important; /* <?php ?> */
+}
+
+.code-viewer .token.package {
+    color: var(--code-class) !important;
+}
+
+/* Line highlighting */
+.code-viewer .line-highlight {
+    background: linear-gradient(
+            to right,
+            rgba(224, 120, 80, 0.15) 70%,
+            rgba(224, 120, 80, 0)
+    ) !important;
+    margin-top: 0 !important;
+}
+
+.code-viewer .line-highlight:before,
+.code-viewer .line-highlight[data-end]:after {
+    display: none !important;
+}
+
+/* Custom scrollbar for code viewer */
+.code-viewer ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.code-viewer ::-webkit-scrollbar-track {
+    background: var(--color-bg-surface);
+    border-radius: 4px;
+}
+
+.code-viewer ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 4px;
+}
+
+.code-viewer ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-secondary);
+}
+
+.code-viewer ::-webkit-scrollbar-corner {
+    background: var(--color-bg-surface);
+}
+
+/* Selection highlight */
+.code-viewer ::selection {
+    background: rgba(224, 120, 80, 0.3);
+    color: inherit;
+}
+
+.code-viewer ::-moz-selection {
+    background: rgba(224, 120, 80, 0.3);
+    color: inherit;
+}
+
+/* Diff highlighting */
+.code-viewer .token.deleted {
+    color: #f87171 !important;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.code-viewer .token.inserted {
+    color: #4ade80 !important;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+/* JSON specific */
+.code-viewer .language-json .token.property {
+    color: var(--code-variable) !important;
+}
+
+.code-viewer .language-json .token.string {
+    color: var(--code-string) !important;
+}
+
+/* YAML specific */
+.code-viewer .language-yaml .token.key {
+    color: var(--code-variable) !important;
+}
+
+/* Blade/HTML specific */
+.code-viewer .language-markup .token.tag {
+    color: var(--code-tag) !important;
+}
+
+.code-viewer .language-markup .token.attr-name {
+    color: var(--code-attr-name) !important;
+}
+
+.code-viewer .language-markup .token.attr-value {
+    color: var(--code-attr-value) !important;
+}
+
+/* SQL specific */
+.code-viewer .language-sql .token.keyword {
+    color: var(--code-keyword) !important;
+    text-transform: uppercase;
+}
+
+/* CSS specific */
+.code-viewer .language-css .token.selector {
+    color: var(--code-function) !important;
+}
+
+.code-viewer .language-css .token.property {
+    color: var(--code-variable) !important;
+}
+
+/* Bash/Shell specific */
+.code-viewer .language-bash .token.function {
+    color: var(--code-function) !important;
+}
+
+.code-viewer .language-bash .token.variable {
+    color: var(--code-variable) !important;
+}
+
+/* Animation for copy feedback */
+@keyframes copyPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+.code-viewer button:active svg {
+    animation: copyPulse 0.2s ease-in-out;
+}
