@@ -1,7 +1,12 @@
 import axios, {AxiosError, AxiosResponse, InternalAxiosRequestConfig} from 'axios';
 
-// API base URL from environment
+// ============================================================================
+// Configuration
+// ============================================================================
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const DEFAULT_TIMEOUT = 30000;
+const UPLOAD_TIMEOUT = 120000;
 
 // ============================================================================
 // Retry Configuration
@@ -13,28 +18,26 @@ interface RetryConfig {
     retryCondition: (error: AxiosError) => boolean;
 }
 
+interface ExtendedAxiosConfig extends InternalAxiosRequestConfig {
+    __retryCount?: number;
+    __skipRetry?: boolean;
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
-    retries: 2, // Reduced from 3 to avoid long waits
-    retryDelay: 1000, // Start with 1 second
+    retries: 2,
+    retryDelay: 1000,
     retryCondition: (error: AxiosError) => {
-        // Don't retry if no response (network error) - usually means server is down
-        // Retrying won't help if the server isn't responding
         if (!error.response) {
-            // Only retry network errors once, not multiple times
-            const config = error.config as InternalAxiosRequestConfig & { __retryCount?: number };
+            const config = error.config as ExtendedAxiosConfig;
             return (config?.__retryCount || 0) < 1;
         }
         const status = error.response.status;
-        // Only retry on 429 (rate limit) or 503 (service unavailable)
-        // Don't retry on general 5xx as they're usually app errors
-        return status === 429 || status === 503;
+        return status === 429 || status === 503 || status === 502;
     },
 };
 
-// Sleep utility for retry delay
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Retry logic with exponential backoff
 async function retryRequest(
     config: InternalAxiosRequestConfig,
     error: AxiosError,
@@ -42,21 +45,15 @@ async function retryRequest(
     maxRetries: number,
     baseDelay: number
 ): Promise<AxiosResponse> {
-    if (retryCount >= maxRetries) {
-        throw error;
+    if (retryCount >= maxRetries) throw error;
+
+    const delay = baseDelay * Math.pow(2, retryCount);
+    if (process.env.NODE_ENV === 'development') {
+        console.log(`Retrying request (${retryCount + 1}/${maxRetries}) after ${delay}ms...`);
     }
 
-    // Exponential backoff: delay * 2^retryCount (1s, 2s, 4s, ...)
-    const delay = baseDelay * Math.pow(2, retryCount);
-    console.log(`Retrying request (${retryCount + 1}/${maxRetries}) after ${delay}ms...`);
-
     await sleep(delay);
-
-    // Create a new config to avoid mutation
-    const retryConfig = {...config};
-    // Mark this as a retry
-    (retryConfig as any).__retryCount = retryCount + 1;
-
+    const retryConfig = {...config, __retryCount: retryCount + 1} as ExtendedAxiosConfig;
     return api.request(retryConfig);
 }
 
@@ -68,12 +65,13 @@ export interface ApiErrorDetail {
     code: string;
     message: string;
     field?: string;
-    details?: Record<string, any>;
+    details?: Record<string, unknown>;
 }
 
 export interface ApiErrorResponse {
     success: false;
-    error: ApiErrorDetail;
+    error?: ApiErrorDetail;
+    detail?: string;
     request_id?: string;
 }
 
@@ -81,15 +79,21 @@ export class ApiError extends Error {
     code: string;
     status: number;
     field?: string;
-    details?: Record<string, any>;
+    details?: Record<string, unknown>;
     requestId?: string;
+    isNetworkError: boolean;
+    isTimeout: boolean;
+    isUnauthorized: boolean;
+    isNotFound: boolean;
+    isServerError: boolean;
+    isRateLimited: boolean;
 
     constructor(
         message: string,
         code: string,
         status: number,
         field?: string,
-        details?: Record<string, any>,
+        details?: Record<string, unknown>,
         requestId?: string
     ) {
         super(message);
@@ -99,30 +103,52 @@ export class ApiError extends Error {
         this.field = field;
         this.details = details;
         this.requestId = requestId;
+        this.isNetworkError = code === 'NETWORK_ERROR';
+        this.isTimeout = code === 'TIMEOUT';
+        this.isUnauthorized = status === 401;
+        this.isNotFound = status === 404;
+        this.isServerError = status >= 500;
+        this.isRateLimited = status === 429;
     }
 
     static fromAxiosError(error: AxiosError<ApiErrorResponse>): ApiError {
-        if (error.response?.data?.error) {
-            const {code, message, field, details} = error.response.data.error;
+        if (error.code === 'ECONNABORTED') {
+            return new ApiError('Request timeout - please try again', 'TIMEOUT', 0);
+        }
+
+        if (!error.response) {
             return new ApiError(
-                message,
-                code,
-                error.response.status,
-                field,
-                details,
-                error.response.data.request_id
+                'Network error - please check your connection',
+                'NETWORK_ERROR',
+                0
             );
         }
 
-        // Fallback for non-standard errors
-        const status = error.response?.status || 0;
-        const message = error.response?.data
-            ? (typeof error.response.data === 'string' ? error.response.data : 'An error occurred')
-            : error.message;
+        const {status, data} = error.response;
+
+        if (data?.error) {
+            const {code, message, field, details} = data.error;
+            return new ApiError(message, code, status, field, details, data.request_id);
+        }
+
+        if (data?.detail) {
+            return new ApiError(data.detail, `HTTP_${status}`, status, undefined, undefined, data.request_id);
+        }
+
+        const statusMessages: Record<number, string> = {
+            400: 'Invalid request',
+            401: 'Authentication required',
+            403: 'Access denied',
+            404: 'Resource not found',
+            429: 'Too many requests - please slow down',
+            500: 'Server error - please try again later',
+            502: 'Service temporarily unavailable',
+            503: 'Service temporarily unavailable',
+        };
 
         return new ApiError(
-            message,
-            status === 0 ? 'NETWORK_ERROR' : `HTTP_${status}`,
+            statusMessages[status] || 'An error occurred',
+            `HTTP_${status}`,
             status
         );
     }
@@ -132,19 +158,15 @@ export class ApiError extends Error {
 // Axios Instance
 // ============================================================================
 
-// Create axios instance
 export const api = axios.create({
     baseURL: API_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    timeout: 30000, // 30 seconds
+    headers: {'Content-Type': 'application/json'},
+    timeout: DEFAULT_TIMEOUT,
 });
 
-// Request interceptor - add auth token
+// Request interceptor
 api.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-        // Get token from localStorage (client-side only)
         if (typeof window !== 'undefined') {
             const token = localStorage.getItem('auth_token');
             if (token && config.headers) {
@@ -156,42 +178,44 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle errors with retry
+// Response interceptor with retry logic
 api.interceptors.response.use(
     (response) => response,
     async (error: AxiosError<ApiErrorResponse>) => {
-        const config = error.config as InternalAxiosRequestConfig & { __retryCount?: number };
+        const config = error.config as ExtendedAxiosConfig;
+
+        if (config?.__skipRetry) {
+            return Promise.reject(ApiError.fromAxiosError(error));
+        }
+
         const retryCount = config?.__retryCount || 0;
         const {retries, retryDelay, retryCondition} = DEFAULT_RETRY_CONFIG;
 
-        // Check if we should retry
         if (config && retryCount < retries && retryCondition(error)) {
             try {
                 return await retryRequest(config, error, retryCount, retries, retryDelay);
             } catch (retryError) {
-                // If retry fails, continue to error handling below
                 error = retryError as AxiosError<ApiErrorResponse>;
             }
         }
 
-        // Handle 401 - redirect to login
-        if (error.response?.status === 401) {
-            if (typeof window !== 'undefined') {
+        if (error.response?.status === 401 && typeof window !== 'undefined') {
+            const currentPath = window.location.pathname;
+            if (!currentPath.includes('/login') && !currentPath.includes('/auth')) {
                 localStorage.removeItem('auth_token');
                 window.location.href = '/login';
             }
         }
 
-        // Transform to ApiError for better error handling
         const apiError = ApiError.fromAxiosError(error);
 
-        // Log error in development
         if (process.env.NODE_ENV === 'development') {
             console.error('[API Error]', {
                 code: apiError.code,
                 message: apiError.message,
                 status: apiError.status,
                 requestId: apiError.requestId,
+                url: config?.url,
             });
         }
 
@@ -200,127 +224,254 @@ api.interceptors.response.use(
 );
 
 // ============================================================================
-// Error Helper Functions
+// Helper Functions
 // ============================================================================
 
-/**
- * Check if error is a network error
- */
 export function isNetworkError(error: unknown): boolean {
-    if (error instanceof ApiError) {
-        return error.code === 'NETWORK_ERROR';
-    }
-    if (error instanceof AxiosError) {
-        return !error.response;
-    }
-    return false;
+    return error instanceof ApiError && error.isNetworkError;
 }
 
-/**
- * Check if error is a specific error code
- */
 export function isErrorCode(error: unknown, code: string): boolean {
     return error instanceof ApiError && error.code === code;
 }
 
-// API helper functions
-export const authApi = {
-    // Get GitHub OAuth URL
-    getGitHubAuthUrl: () => `${API_URL}/auth/github`,
+export function getErrorMessage(error: unknown): string {
+    if (error instanceof ApiError) return error.message;
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    if (error && typeof error === 'object') {
+        const e = error as Record<string, unknown>;
+        if (typeof e.message === 'string') return e.message;
+        if (e.response && typeof e.response === 'object') {
+            const resp = e.response as Record<string, unknown>;
+            if (resp.data && typeof resp.data === 'object') {
+                const data = resp.data as Record<string, unknown>;
+                if (typeof data.detail === 'string') return data.detail;
+                if (typeof data.message === 'string') return data.message;
+            }
+        }
+    }
+    return 'An unexpected error occurred';
+}
 
-    // Get current user
-    getMe: () => api.get('/auth/me'),
-};
+export function isRetryableError(error: unknown): boolean {
+    if (!(error instanceof ApiError)) return false;
+    return error.isNetworkError || error.isTimeout || error.isRateLimited || error.status === 503;
+}
 
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+// --- Auth Types ---
+export interface User {
+    id: string;
+    username: string;
+    email: string | null;
+    avatar_url: string | null;
+    name?: string;
+}
+
+export interface AuthResponse {
+    access_token: string;
+    token_type: string;
+    user: User;
+}
+
+export interface ExchangeCodeRequest {
+    code: string;
+}
+
+// --- Health Types ---
+export interface HealthResponse {
+    status: 'healthy' | 'unhealthy';
+    service: string;
+}
+
+// --- GitHub Types ---
+export interface GitHubRepo {
+    id: number;
+    name: string;
+    full_name: string;
+    default_branch: string;
+    private: boolean;
+    updated_at: string;
+    html_url: string;
+    description: string | null;
+    language: string | null;
+}
+
+// --- Project Types ---
+export type ProjectStatus = 'pending' | 'cloning' | 'indexing' | 'scanning' | 'analyzing' | 'ready' | 'error';
+
+export interface Project {
+    id: string;
+    name: string;
+    repo_full_name: string;
+    repo_url: string;
+    default_branch: string;
+    clone_path: string | null;
+    status: ProjectStatus;
+    indexed_files_count: number;
+    laravel_version: string | null;
+    error_message: string | null;
+    last_indexed_at: string | null;
+    created_at: string;
+    updated_at: string;
+    stack?: Record<string, unknown>;
+    file_stats?: Record<string, unknown>;
+    health_score?: number;
+    scan_progress?: number;
+    scan_message?: string | null;
+    scanned_at?: string | null;
+    php_version?: string | null;
+    structure?: Record<string, unknown>;
+    health_check?: Record<string, unknown>;
+}
+
+export interface CreateProjectRequest {
+    github_repo_id: number;
+}
+
+// --- File Types ---
 export interface FileNode {
     name: string;
     path: string;
     type: 'file' | 'directory';
-    children?: FileNode[];
     indexed?: boolean;
+    children?: FileNode[];
 }
 
 export interface FileContentResponse {
-    path: string;
+    file_path: string;
     content: string;
+    language?: string;
     indexed: boolean;
 }
 
-export const filesApi = {
-    // Get file tree for a project
-    getFileTree: (projectId: string) => api.get(`/projects/${projectId}/files`),
+// --- Issue Types ---
+export type IssueSeverity = 'critical' | 'warning' | 'info';
+export type IssueStatus = 'open' | 'fixed' | 'ignored';
+export type IssueCategory = 'security' | 'performance' | 'best_practices' | 'code_quality' | 'deprecation';
 
-    // Get file content
-    getFileContent: (projectId: string, filePath: string) => api.get(`/projects/${projectId}/files/${encodeURIComponent(filePath)}`),
-};
+export interface ProjectIssue {
+    id: string;
+    category: IssueCategory;
+    severity: IssueSeverity;
+    title: string;
+    description: string;
+    file_path?: string;
+    line_number?: number;
+    suggestion?: string;
+    auto_fixable: boolean;
+    status: IssueStatus;
+    created_at: string;
+}
 
+export interface IssueFilters {
+    category?: IssueCategory;
+    severity?: IssueSeverity;
+    status_filter?: IssueStatus;
+}
 
-export const projectsApi = {
-    // List all projects
-    list: () => api.get('/projects'),
+// --- Conversation Types ---
+export interface Conversation {
+    id: string;
+    project_id: string;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+    message_count: number;
+    last_message?: string | null;
+}
 
-    // Create new project (connect repo)
-    create: (githubRepoId: number) => api.post('/projects', {github_repo_id: githubRepoId}),
+export interface ConversationMessage {
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    code_changes?: Record<string, unknown>;
+    processing_data?: {
+        intent?: unknown;
+        plan?: unknown;
+        execution_results?: unknown[];
+        validation?: unknown;
+        events?: unknown[];
+        success?: boolean;
+        error?: string;
+        agent_timeline?: unknown;
+    };
+    created_at: string;
+}
 
-    // Get single project
-    get: (id: string) => api.get(`/projects/${id}`),
+export interface ConversationListParams {
+    limit?: number;
+    offset?: number;
+}
 
-    // Start indexing
-    startIndexing: (id: string) => api.post(`/projects/${id}/index`),
+export type LogType = 'main' | 'json' | 'agents' | 'files';
 
-    // Start cloning
-    startCloning: (id: string) => api.post(`/projects/${id}/clone`),
+// --- Chat Types ---
+export interface ChatRequest {
+    message: string;
+    conversation_id?: string | null;
+    interactive_mode?: boolean;
+    require_plan_approval?: boolean;
+}
 
-    // Delete project
-    delete: (id: string) => api.delete(`/projects/${id}`),
+export interface PlanStep {
+    order: number;
+    action: string;
+    file: string;
+    description: string;
+}
 
-    // ========== Project Scanning ==========
-
-    // Start a project scan
-    startScan: (id: string) => api.post(`/projects/${id}/scan`),
-
-    // Get scan status
-    getScanStatus: (id: string) => api.get(`/projects/${id}/scan/status`),
-
-    // Get project health details
-    getHealth: (id: string) => api.get(`/projects/${id}/health`),
-
-    // Get project issues
-    getIssues: (id: string, params?: { category?: string; severity?: string; status?: string }) =>
-        api.get(`/projects/${id}/issues`, {params}),
-
-    // Update issue status
-    updateIssueStatus: (projectId: string, issueId: string, status: string) =>
-        api.patch(`/projects/${projectId}/issues/${issueId}`, null, {params: {status_update: status}}),
-};
-
-export const githubApi = {
-    // List user's GitHub repos (filtered to PHP/Laravel)
-    listRepos: () => api.get('/github/repos'),
-
-    // Get specific repo by ID
-    getRepo: (repoId: number) => api.get(`/github/repos/${repoId}`),
-};
+export interface ModifiedPlan {
+    summary: string;
+    steps: PlanStep[];
+}
 
 export interface PlanApprovalRequest {
     conversation_id: string;
     approved: boolean;
-    modified_plan?: {
-        summary: string;
-        steps: Array<{
-            order: number;
-            action: string;
-            file: string;
-            description: string;
-        }>;
-    };
+    modified_plan?: ModifiedPlan;
     rejection_reason?: string;
+}
+
+export interface PlanApprovalResponse {
+    success: boolean;
+    message: string;
+    approved: boolean;
+}
+
+export interface Agent {
+    type: string;
+    name: string;
+    description: string;
+    emoji: string;
+}
+
+export interface AgentsResponse {
+    success: boolean;
+    agents: Agent[];
+}
+
+// --- Git Types ---
+export interface GitBranch {
+    name: string;
+    is_current: boolean;
+    is_remote: boolean;
+    commit: string;
+    message?: string;
+    author?: string;
+    date?: string;
 }
 
 export interface FileChange {
     file: string;
     action: 'create' | 'modify' | 'delete';
-    content?: string;
+    content?: string | null;
+    diff?: string | null;
+    original_content?: string | null;
 }
 
 export interface ApplyChangesRequest {
@@ -328,6 +479,13 @@ export interface ApplyChangesRequest {
     branch_name?: string;
     commit_message: string;
     base_branch?: string;
+}
+
+export interface ApplyChangesResponse {
+    branch_name: string;
+    commit_hash: string;
+    files_changed: number;
+    message: string;
 }
 
 export interface CreatePRRequest {
@@ -338,40 +496,22 @@ export interface CreatePRRequest {
     ai_summary?: string;
 }
 
-export const gitApi = {
-    // List all branches
-    listBranches: (projectId: string) =>
-        api.get(`/projects/${projectId}/branches`),
-
-    // Apply changes to new branch
-    applyChanges: (projectId: string, data: ApplyChangesRequest) =>
-        api.post(`/projects/${projectId}/apply`, data),
-
-    // Create pull request
-    createPR: (projectId: string, data: CreatePRRequest) =>
-        api.post(`/projects/${projectId}/pr`, data),
-
-    // Sync with remote (pull latest)
-    sync: (projectId: string) =>
-        api.post(`/projects/${projectId}/sync`),
-
-    // Reset to remote
-    reset: (projectId: string, branch?: string) =>
-        api.post(`/projects/${projectId}/reset`, null, {params: {branch}}),
-
-    // Get diff
-    getDiff: (projectId: string, baseBranch?: string) =>
-        api.get(`/projects/${projectId}/diff`, {params: {base_branch: baseBranch}}),
-};
-
-// Git changes tracking types
-export interface GitChangeFile {
-    file: string;
-    action: 'create' | 'modify' | 'delete';
-    content?: string;
-    diff?: string;
-    original_content?: string;
+export interface PRResponse {
+    number: number;
+    url: string;
+    title: string;
+    state: 'open' | 'closed' | 'merged';
+    created_at: string;
 }
+
+export interface SyncResponse {
+    success: boolean;
+    message: string;
+    had_changes: boolean;
+}
+
+// --- Git Changes Types ---
+export type GitChangeStatus = 'pending' | 'applied' | 'pushed' | 'pr_created' | 'pr_merged' | 'merged' | 'rolled_back' | 'discarded';
 
 export interface GitChange {
     id: string;
@@ -381,13 +521,13 @@ export interface GitChange {
     branch_name: string;
     base_branch: string;
     commit_hash?: string;
-    status: 'pending' | 'applied' | 'pushed' | 'pr_created' | 'pr_merged' | 'merged' | 'rolled_back' | 'discarded';
+    status: GitChangeStatus;
     pr_number?: number;
     pr_url?: string;
-    pr_state?: string;
+    pr_state?: 'open' | 'closed' | 'merged';
     title?: string;
     description?: string;
-    files_changed?: GitChangeFile[];
+    files_changed?: FileChange[];
     change_summary?: string;
     rollback_commit?: string;
     rolled_back_at?: string;
@@ -407,18 +547,29 @@ export interface CreateGitChangeRequest {
     base_branch?: string;
     title?: string;
     description?: string;
-    files_changed?: GitChangeFile[];
+    files_changed?: FileChange[];
     change_summary?: string;
 }
 
 export interface UpdateGitChangeRequest {
-    status?: string;
+    status?: GitChangeStatus;
     commit_hash?: string;
     pr_number?: number;
     pr_url?: string;
     pr_state?: string;
     title?: string;
     description?: string;
+}
+
+export interface GitChangesListParams {
+    status_filter?: GitChangeStatus;
+    conversation_id?: string;
+    limit?: number;
+    offset?: number;
+}
+
+export interface RollbackRequest {
+    force?: boolean;
 }
 
 export interface RollbackResponse {
@@ -428,251 +579,415 @@ export interface RollbackResponse {
     previous_status: string;
 }
 
-export const gitChangesApi = {
-    // List all changes for a project
-    listProjectChanges: (projectId: string, params?: {
-        status?: string;
-        conversation_id?: string;
-        limit?: number;
-        offset?: number
-    }) =>
-        api.get<GitChange[]>(`/projects/${projectId}/changes`, {params}),
+export interface DeleteChangeResponse {
+    success: boolean;
+    message: string;
+}
 
-    // List changes for a conversation
-    listConversationChanges: (projectId: string, conversationId: string) =>
-        api.get<GitChange[]>(`/projects/${projectId}/conversations/${conversationId}/changes`),
+// --- Usage Types ---
+export interface UsageSummary {
+    total_requests: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_tokens: number;
+    total_cost: number;
+}
 
-    // Get a specific change
-    getChange: (projectId: string, changeId: string) =>
-        api.get<GitChange>(`/projects/${projectId}/changes/${changeId}`),
+export interface ProviderUsage {
+    requests: number;
+    tokens: number;
+    cost: number;
+}
 
-    // Create a new change record
-    createChange: (projectId: string, data: CreateGitChangeRequest) =>
-        api.post<GitChange>(`/projects/${projectId}/changes`, data),
+export interface ModelUsage extends ProviderUsage {
+    provider: string;
+}
 
-    // Update a change
-    updateChange: (projectId: string, changeId: string, data: UpdateGitChangeRequest) =>
-        api.patch<GitChange>(`/projects/${projectId}/changes/${changeId}`, data),
+export interface UsageSummaryResponse {
+    summary: UsageSummary;
+    by_provider: Record<string, ProviderUsage>;
+    by_model: Record<string, ModelUsage>;
+    today: {
+        requests: number;
+        cost: number;
+    };
+    period: {
+        start: string;
+        end: string;
+    };
+}
 
-    // Apply a pending change
-    applyChange: (projectId: string, changeId: string) =>
-        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/apply`),
+export interface DailyUsage {
+    date: string;
+    requests: number;
+    input_tokens: number;
+    output_tokens: number;
+    cost: number;
+    avg_latency_ms?: number;
+}
 
-    // Push an applied change
-    pushChange: (projectId: string, changeId: string) =>
-        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/push`),
+export interface UsageHistoryItem {
+    id: string;
+    provider: string;
+    model: string;
+    request_type: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    total_cost: number;
+    latency_ms: number;
+    status: 'success' | 'error';
+    error_message?: string;
+    project_id?: string;
+    created_at: string;
+}
 
-    // Create PR for a change
-    createPRForChange: (projectId: string, changeId: string, params?: { title?: string; description?: string }) =>
-        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/create-pr`, null, {params}),
+export interface UsageHistoryResponse {
+    items: UsageHistoryItem[];
+    total: number;
+    page: number;
+    limit: number;
+    pages: number;
+}
 
-    // Rollback a change
-    rollbackChange: (projectId: string, changeId: string, force?: boolean) =>
-        api.post<RollbackResponse>(`/projects/${projectId}/changes/${changeId}/rollback`, {force}),
+export interface UsageHistoryParams {
+    page?: number;
+    limit?: number;
+    project_id?: string;
+    provider?: string;
+    request_type?: string;
+}
 
-    // Delete a change record
-    deleteChange: (projectId: string, changeId: string) =>
-        api.delete(`/projects/${projectId}/changes/${changeId}`),
+export interface ProjectUsageResponse {
+    project_id: string;
+    total_requests: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cost: number;
+    by_request_type: Record<string, number>;
+    period: {
+        start: string;
+        end: string;
+    };
+}
+
+export interface ModelPricing {
+    input_per_million: number;
+    output_per_million: number;
+}
+
+export interface PricingResponse {
+    providers: Record<string, Record<string, ModelPricing>>;
+}
+
+// ============================================================================
+// API Modules
+// ============================================================================
+
+// --- Health API ---
+export const healthApi = {
+    check: () => api.get<HealthResponse>('/health'),
 };
 
-// Add these to your existing frontend/src/lib/api.ts file
+// --- Auth API ---
+export const authApi = {
+    getGitHubAuthUrl: () => `${API_URL}/auth/github`,
 
-// ============== TYPES ==============
+    exchangeCode: (code: string) =>
+        api.post<AuthResponse>('/auth/exchange', {code}),
 
-export interface PlanApprovalRequest {
-    conversation_id: string;
-    approved: boolean;
-    modified_plan?: {
-        summary: string;
-        steps: Array<{
-            order: number;
-            action: string;
-            file: string;
-            description: string;
-        }>;
-    };
-    rejection_reason?: string;
-}
+    getMe: () => api.get<User>('/auth/me'),
 
-export interface Conversation {
-    id: string;
-    project_id: string;
-    title: string;
-    created_at: string;
-    updated_at: string;
-    message_count: number;
-}
+    handleCallback: async (code: string): Promise<AuthResponse> => {
+        const response = await api.post<AuthResponse>('/auth/exchange', {code});
+        return response.data;
+    },
+};
 
-export interface ConversationMessage {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    created_at: string;
-    processing_data?: {
-        intent?: any;
-        plan?: any;
-        execution_results?: any[];
-        validation?: any;
-        events?: any[];
-        success?: boolean;
-        error?: string;
-        agent_timeline?: any;
-    };
-}
+// --- GitHub API ---
+export const githubApi = {
+    listRepos: () => api.get<GitHubRepo[]>('/github/repos'),
 
-// ============== CHAT API ==============
+    getRepo: (repoId: number) => api.get<GitHubRepo>(`/github/repos/${repoId}`),
+};
 
+// --- Projects API ---
+export const projectsApi = {
+    list: () => api.get<Project[]>('/projects'),
+
+    create: (githubRepoId: number) =>
+        api.post<Project>('/projects', {github_repo_id: githubRepoId}),
+
+    get: (id: string) => api.get<Project>(`/projects/${id}`),
+
+    delete: (id: string) => api.delete(`/projects/${id}`),
+
+    startIndexing: (id: string) => api.post(`/projects/${id}/index`),
+
+    startCloning: (id: string) => api.post(`/projects/${id}/clone`),
+
+    startScan: (id: string) => api.post(`/projects/${id}/scan`),
+
+    getScanStatus: (id: string) => api.get(`/projects/${id}/scan/status`),
+
+    getHealth: (id: string) => api.get(`/projects/${id}/health`),
+
+    getIssues: (id: string, filters?: IssueFilters) =>
+        api.get<ProjectIssue[]>(`/projects/${id}/issues`, {params: filters}),
+
+    updateIssueStatus: (projectId: string, issueId: string, status: IssueStatus) =>
+        api.patch<ProjectIssue>(`/projects/${projectId}/issues/${issueId}`, null, {
+            params: {status_update: status}
+        }),
+};
+
+// --- Files API ---
+export const filesApi = {
+    getFileTree: (projectId: string) =>
+        api.get<FileNode[]>(`/projects/${projectId}/files`),
+
+    getFileContent: (projectId: string, filePath: string) =>
+        api.get<FileContentResponse>(`/projects/${projectId}/files/${encodeURIComponent(filePath)}`),
+};
+
+// --- Chat API ---
 export const chatApi = {
-    /**
-     * List all conversations for a project
-     */
-    listConversations: (projectId: string) =>
-        api.get<Conversation[]>(`/projects/${projectId}/conversations`),
+    getChatUrl: (projectId: string) => `${API_URL}/projects/${projectId}/chat`,
 
-    /**
-     * Get messages for a specific conversation
-     */
+    listConversations: (projectId: string, params?: ConversationListParams) =>
+        api.get<Conversation[]>(`/projects/${projectId}/conversations`, {params}),
+
     getMessages: (projectId: string, conversationId: string) =>
         api.get<ConversationMessage[]>(`/projects/${projectId}/conversations/${conversationId}`),
 
-    /**
-     * Delete a conversation
-     */
     deleteConversation: (projectId: string, conversationId: string) =>
-        api.delete(`/projects/${projectId}/conversations/${conversationId}`),
+        api.delete<{message: string}>(`/projects/${projectId}/conversations/${conversationId}`),
 
-    /**
-     * Get the chat endpoint URL for SSE streaming
-     */
-    getChatUrl: (projectId: string) =>
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/projects/${projectId}/chat`,
+    getLogs: (projectId: string, conversationId: string, logType: LogType = 'main') =>
+        api.get<string>(`/projects/${projectId}/conversations/${conversationId}/logs`, {
+            params: {log_type: logType}
+        }),
 
-    /**
-     * Approve or reject a plan in interactive mode
-     */
     approvePlan: (projectId: string, data: PlanApprovalRequest) =>
-        api.post(`/projects/${projectId}/chat/approve-plan`, data),
+        api.post<PlanApprovalResponse>(`/projects/${projectId}/chat/approve-plan`, data),
 
-    /**
-     * Get available agents information
-     */
-    getAgents: () => api.get('/chat/agents'),
+    getAgents: (projectId: string) =>
+        api.get<AgentsResponse>(`/projects/${projectId}/chat/agents`),
 };
 
-// ============== ERROR HANDLING ==============
+// --- Git API ---
+export const gitApi = {
+    listBranches: (projectId: string) =>
+        api.get<GitBranch[]>(`/projects/${projectId}/git/branches`),
 
-/**
- * Extract error message from various error types
- */
-export function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    if (typeof error === 'string') {
-        return error;
-    }
-    if (error && typeof error === 'object') {
-        // Handle axios-style errors
-        const axiosError = error as any;
-        if (axiosError.response?.data?.detail) {
-            return axiosError.response.data.detail;
+    applyChanges: (projectId: string, data: ApplyChangesRequest) =>
+        api.post<ApplyChangesResponse>(`/projects/${projectId}/git/apply`, data),
+
+    createPR: (projectId: string, data: CreatePRRequest) =>
+        api.post<PRResponse>(`/projects/${projectId}/git/pr`, data),
+
+    sync: (projectId: string) =>
+        api.post<SyncResponse>(`/projects/${projectId}/git/sync`),
+
+    reset: (projectId: string, branch?: string) =>
+        api.post(`/projects/${projectId}/git/reset`, null, {params: {branch}}),
+
+    getDiff: (projectId: string, baseBranch?: string) =>
+        api.get(`/projects/${projectId}/git/diff`, {params: {base_branch: baseBranch}}),
+};
+
+// --- Git Changes API ---
+export const gitChangesApi = {
+    listProjectChanges: (projectId: string, params?: GitChangesListParams) =>
+        api.get<GitChange[]>(`/projects/${projectId}/changes`, {params}),
+
+    listConversationChanges: (projectId: string, conversationId: string) =>
+        api.get<GitChange[]>(`/projects/${projectId}/conversations/${conversationId}/changes`),
+
+    getChange: (projectId: string, changeId: string) =>
+        api.get<GitChange>(`/projects/${projectId}/changes/${changeId}`),
+
+    createChange: (projectId: string, data: CreateGitChangeRequest) =>
+        api.post<GitChange>(`/projects/${projectId}/changes`, data),
+
+    updateChange: (projectId: string, changeId: string, data: UpdateGitChangeRequest) =>
+        api.patch<GitChange>(`/projects/${projectId}/changes/${changeId}`, data),
+
+    applyChange: (projectId: string, changeId: string) =>
+        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/apply`),
+
+    pushChange: (projectId: string, changeId: string) =>
+        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/push`),
+
+    createPRForChange: (projectId: string, changeId: string, params?: {title?: string; description?: string}) =>
+        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/pr`, null, {params}),
+
+    rollbackChange: (projectId: string, changeId: string, force?: boolean) =>
+        api.post<RollbackResponse>(`/projects/${projectId}/changes/${changeId}/rollback`, {force}),
+
+    deleteChange: (projectId: string, changeId: string) =>
+        api.delete<DeleteChangeResponse>(`/projects/${projectId}/changes/${changeId}`),
+};
+
+// --- Usage API ---
+export const usageApi = {
+    getSummary: (days: number = 30) =>
+        api.get<UsageSummaryResponse>('/usage/summary', {params: {days}}),
+
+    getDaily: (days: number = 30) =>
+        api.get<DailyUsage[]>('/usage/daily', {params: {days}}),
+
+    getHistory: (params?: UsageHistoryParams) =>
+        api.get<UsageHistoryResponse>('/usage/history', {params}),
+
+    getProjectUsage: (projectId: string, days: number = 30) =>
+        api.get<ProjectUsageResponse>(`/usage/project/${projectId}`, {params: {days}}),
+
+    getPricing: () => api.get<PricingResponse>('/usage/pricing'),
+};
+
+// ============================================================================
+// SSE Streaming Utilities
+// ============================================================================
+
+export type SSEEventType =
+    | 'message_start'
+    | 'intent'
+    | 'context'
+    | 'plan'
+    | 'plan_approval_required'
+    | 'execution_step'
+    | 'validation'
+    | 'answer_chunk'
+    | 'complete'
+    | 'error';
+
+export interface SSEEvent {
+    event: SSEEventType;
+    data: unknown;
+}
+
+export interface SSEStreamOptions {
+    onEvent: (event: SSEEvent) => void;
+    onError?: (error: Error) => void;
+    onClose?: () => void;
+    signal?: AbortSignal;
+}
+
+export async function createChatStream(
+    projectId: string,
+    request: ChatRequest,
+    options: SSEStreamOptions
+): Promise<void> {
+    const url = chatApi.getChatUrl(projectId);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token && {Authorization: `Bearer ${token}`}),
+            },
+            body: JSON.stringify(request),
+            signal: options.signal,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new ApiError(
+                errorData.detail || `HTTP ${response.status}`,
+                `HTTP_${response.status}`,
+                response.status
+            );
         }
-        if (axiosError.response?.data?.message) {
-            return axiosError.response.data.message;
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            let currentEvent: string | null = null;
+            let currentData = '';
+
+            for (const line of lines) {
+                if (line.startsWith('event:')) {
+                    currentEvent = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                    currentData = line.slice(5).trim();
+                } else if (line === '' && currentEvent && currentData) {
+                    try {
+                        const parsedData = JSON.parse(currentData);
+                        options.onEvent({event: currentEvent as SSEEventType, data: parsedData});
+                    } catch {
+                        options.onEvent({event: currentEvent as SSEEventType, data: currentData});
+                    }
+                    currentEvent = null;
+                    currentData = '';
+                }
+            }
         }
-        if (axiosError.message) {
-            return axiosError.message;
+
+        options.onClose?.();
+    } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+            options.onClose?.();
+            return;
+        }
+        options.onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
+}
+
+// ============================================================================
+// Request Helpers
+// ============================================================================
+
+export async function withRetry<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = 3,
+    delayMs: number = 1000
+): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (!isRetryableError(error) || i === maxRetries - 1) throw lastError;
+            await sleep(delayMs * Math.pow(2, i));
         }
     }
-    return 'An unexpected error occurred';
+
+    throw lastError;
 }
 
-// ============== STORE TYPES (if using Zustand) ==============
+export function createAbortController(timeoutMs?: number): {
+    controller: AbortController;
+    cleanup: () => void;
+} {
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
 
-// Add to frontend/src/lib/store.ts
-
-interface Project {
-    id: string;
-    repo_name: string;
-    repo_full_name: string;
-    github_repo_id: number;
-    status: string;
-    indexed_at?: string;
-    created_at: string;
-    updated_at: string;
-}
-
-interface User {
-    id: string;
-    email: string;
-    name?: string;
-    username: string;
-    avatar_url?: string;
-}
-
-interface AuthState {
-    isAuthenticated: boolean;
-    isHydrated: boolean;
-    user: User | null;
-    token: string | null;
-    setAuth: (user: User, token: string) => void;
-    clearAuth: () => void;
-    setHydrated: () => void;
-}
-
-interface ProjectsState {
-    projects: Project[];
-    selectedProject: Project | null;
-    setProjects: (projects: Project[]) => void;
-    selectProject: (project: Project) => void;
-    clearSelected: () => void;
-}
-
-// Example Zustand store implementation:
-/*
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      isAuthenticated: false,
-      isHydrated: false,
-      user: null,
-      token: null,
-      setAuth: (user, token) => {
-        localStorage.setItem('auth_token', token);
-        set({ isAuthenticated: true, user, token });
-      },
-      clearAuth: () => {
-        localStorage.removeItem('auth_token');
-        set({ isAuthenticated: false, user: null, token: null });
-      },
-      setHydrated: () => set({ isHydrated: true }),
-    }),
-    {
-      name: 'auth-storage',
-      onRehydrateStorage: () => (state) => {
-        state?.setHydrated();
-      },
+    if (timeoutMs) {
+        timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     }
-  )
-);
 
-export const useProjectsStore = create<ProjectsState>()(
-  persist(
-    (set) => ({
-      projects: [],
-      selectedProject: null,
-      setProjects: (projects) => set({ projects }),
-      selectProject: (project) => set({ selectedProject: project }),
-      clearSelected: () => set({ selectedProject: null }),
-    }),
-    {
-      name: 'projects-storage',
-    }
-  )
-);
-*/
+    return {
+        controller,
+        cleanup: () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        },
+    };
+}
 
 export default api;

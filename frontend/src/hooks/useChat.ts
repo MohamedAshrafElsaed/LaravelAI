@@ -1,178 +1,22 @@
-'use client';
+// frontend/src/hooks/useChat.ts
+// Enhanced chat hook with full SSE streaming, agent conversations, and plan approval
 
-import {useCallback, useEffect, useRef, useState} from 'react';
-import {chatApi, getErrorMessage} from '@/lib/api';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { chatApi, getErrorMessage } from '@/lib/api';
+import type {
+    Message,
+    Plan,
+    ValidationResult,
+    ConversationEntry,
+    AgentThinkingState,
+    AgentInfo,
+    AgentType,
+    InteractiveEvent,
+} from '@/components/chat/types';
+import { AGENT_CONFIG } from '@/components/chat/AgentBadge';
 
 // ============== TYPES ==============
-export type AgentType = 'nova' | 'scout' | 'blueprint' | 'forge' | 'guardian' | 'conductor';
-
-export interface AgentInfo {
-    type: AgentType;
-    name: string;
-    role: string;
-    color: string;
-    icon: string;
-    avatar_emoji: string;
-    personality: string;
-}
-
-export interface PlanStep {
-    order: number;
-    action: 'create' | 'modify' | 'delete';
-    file: string;
-    description: string;
-}
-
-export interface Plan {
-    summary: string;
-    steps: PlanStep[];
-}
-
-export interface ValidationIssue {
-    severity: 'error' | 'warning' | 'info';
-    file: string;
-    message: string;
-    line?: number;
-    suggestion?: string;
-}
-
-export interface ValidationResult {
-    approved: boolean;
-    score: number;
-    issues: ValidationIssue[];
-    suggestions: string[];
-    summary: string;
-}
-
-export interface ExecutionResult {
-    action: string;
-    file: string;
-    success: boolean;
-    description?: string;
-    error?: string;
-}
-
-export interface ConversationEntry {
-    id: string;
-    type: 'thinking' | 'message' | 'action' | 'system';
-    timestamp: string;
-    agentType?: AgentType;
-    thought?: string;
-    message?: string;
-    messageType?: 'greeting' | 'thinking' | 'handoff' | 'completion' | 'error' | 'custom';
-    toAgent?: AgentType;
-    actionType?: string;
-    filePath?: string;
-    isComplete?: boolean;
-    systemType?: 'info' | 'success' | 'warning' | 'error';
-}
-
-export interface Message {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: Date;
-    processingData?: {
-        intent?: any;
-        plan?: Plan;
-        execution_results?: ExecutionResult[];
-        validation?: ValidationResult;
-        events?: any[];
-        success?: boolean;
-        error?: string;
-        agent_timeline?: any;
-        agent_activity?: ConversationEntry[];
-    };
-}
-
-export interface AgentThinkingState {
-    agent: AgentInfo;
-    thought: string;
-    actionType?: string;
-    filePath?: string;
-    stepIndex?: number;
-    progress: number;
-}
-
-export interface InteractiveEvent {
-    event: string;
-    data: Record<string, any>;
-}
-
-// ============== CONSTANTS ==============
-export const AGENT_COLORS: Record<AgentType, string> = {
-    nova: '#9333EA',
-    scout: '#3B82F6',
-    blueprint: '#F97316',
-    forge: '#22C55E',
-    guardian: '#EF4444',
-    conductor: '#FFFFFF',
-};
-
-export const DEFAULT_AGENTS: Record<AgentType, AgentInfo> = {
-    nova: {
-        type: 'nova',
-        name: 'Nova',
-        role: 'Intent Analyzer',
-        color: '#9333EA',
-        icon: 'sparkles',
-        avatar_emoji: '🟣',
-        personality: 'The curious investigator'
-    },
-    scout: {
-        type: 'scout',
-        name: 'Scout',
-        role: 'Context Retriever',
-        color: '#3B82F6',
-        icon: 'search',
-        avatar_emoji: '🔵',
-        personality: 'The code archaeologist'
-    },
-    blueprint: {
-        type: 'blueprint',
-        name: 'Blueprint',
-        role: 'Planner',
-        color: '#F97316',
-        icon: 'clipboard-list',
-        avatar_emoji: '🟠',
-        personality: 'The strategic architect'
-    },
-    forge: {
-        type: 'forge',
-        name: 'Forge',
-        role: 'Executor',
-        color: '#22C55E',
-        icon: 'code',
-        avatar_emoji: '🟢',
-        personality: 'The master craftsman'
-    },
-    guardian: {
-        type: 'guardian',
-        name: 'Guardian',
-        role: 'Validator',
-        color: '#EF4444',
-        icon: 'shield-check',
-        avatar_emoji: '🔴',
-        personality: 'The quality guardian'
-    },
-    conductor: {
-        type: 'conductor',
-        name: 'Conductor',
-        role: 'Orchestrator',
-        color: '#FFFFFF',
-        icon: 'users',
-        avatar_emoji: '⚪',
-        personality: 'The team lead'
-    },
-};
-
-export function getAgentInfo(agentType: AgentType | string): AgentInfo {
-    const type = agentType.toLowerCase() as AgentType;
-    return DEFAULT_AGENTS[type] || DEFAULT_AGENTS.conductor;
-}
-
-// ============== HOOK ==============
-interface UseChatOptions {
+export interface UseChatOptions {
     projectId: string;
     initialConversationId?: string | null;
     onConversationChange?: (id: string | null) => void;
@@ -200,20 +44,22 @@ export interface UseChatReturn {
     isPlanApprovalLoading: boolean;
     // Validation
     validationResult: ValidationResult | null;
-    // Agents
-    agents: AgentInfo[];
+    // Execution
+    executionResults: any[];
     // Refs
-    messagesEndRef: React.RefObject<HTMLDivElement>;
+    messagesEndRef: React.RefObject<HTMLDivElement | null>;
+    inputRef: React.RefObject<HTMLTextAreaElement | null>;
     // Actions
     sendMessage: (messageText?: string) => Promise<void>;
-    handlePlanApproval: (plan?: Plan) => Promise<void>;
+    handlePlanApproval: (modifiedPlan?: Plan) => Promise<void>;
     handlePlanRejection: (reason?: string) => Promise<void>;
     startNewChat: () => void;
     loadMessages: (convId: string) => Promise<void>;
-    loadConversation: (convId: string) => Promise<void>;
     clearError: () => void;
+    abort: () => void;
 }
 
+// ============== HOOK ==============
 export function useChat({
                             projectId,
                             initialConversationId,
@@ -229,6 +75,7 @@ export function useChat({
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId || null);
     const [error, setError] = useState<string | null>(null);
     const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
     // Agent conversation state
     const [conversationEntries, setConversationEntries] = useState<ConversationEntry[]>([]);
@@ -240,72 +87,42 @@ export function useChat({
     const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
     const [isPlanApprovalLoading, setIsPlanApprovalLoading] = useState(false);
 
-    // Validation state
+    // Validation & execution state
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
-
-    // Agents info
-    const [agents, setAgents] = useState<AgentInfo[]>(Object.values(DEFAULT_AGENTS));
-
-    // Auth token
-    const [authToken, setAuthToken] = useState<string>('');
-    const [mounted, setMounted] = useState(false);
+    const [executionResults, setExecutionResults] = useState<any[]>([]);
 
     // Refs
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const conversationEntriesRef = useRef<ConversationEntry[]>([]);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
-    // Keep ref in sync with state for use in callbacks
-    useEffect(() => {
-        conversationEntriesRef.current = conversationEntries;
-    }, [conversationEntries]);
-
-    // Processing state key for localStorage persistence
-    const processingStateKey = `chat_processing_${projectId}`;
+    // Storage keys
     const conversationKey = `conversation_${projectId}`;
+    const processingStateKey = `chat_processing_${projectId}`;
 
-    // Initialize on mount
-    useEffect(() => {
-        setMounted(true);
-        setAuthToken(localStorage.getItem('auth_token') || '');
-    }, []);
-
-    // Load saved conversation on mount
-    useEffect(() => {
-        if (!mounted) return;
-        const savedConvId = localStorage.getItem(conversationKey);
-        if (savedConvId) {
-            loadMessages(savedConvId);
-        }
-    }, [projectId, mounted]);
-
-    // Generate entry ID
+    // ============== HELPERS ==============
     const generateEntryId = useCallback(() => {
         entryIdRef.current += 1;
         return `entry-${entryIdRef.current}`;
     }, []);
 
-    // Add conversation entry
     const addEntry = useCallback((entry: Omit<ConversationEntry, 'id'>) => {
-        const newEntry: ConversationEntry = {
-            ...entry,
-            id: generateEntryId(),
-        };
-        setConversationEntries(prev => [...prev, newEntry]);
+        const newEntry = { ...entry, id: generateEntryId() };
+        setConversationEntries((prev) => [...prev, newEntry]);
     }, [generateEntryId]);
 
-    // Clear entries
     const clearEntries = useCallback(() => {
         setConversationEntries([]);
+        setCurrentThinking(null);
         entryIdRef.current = 0;
     }, []);
 
-    // Clear error
     const clearError = useCallback(() => {
         setError(null);
     }, []);
 
-    // Save processing state to localStorage
     const saveProcessingState = useCallback((isProcessing: boolean, convId: string | null) => {
+        if (typeof window === 'undefined') return;
         if (isProcessing && convId) {
             localStorage.setItem(processingStateKey, JSON.stringify({
                 isLoading: true,
@@ -317,7 +134,27 @@ export function useChat({
         }
     }, [processingStateKey]);
 
-    // Load messages from API
+    const scrollToBottom = useCallback(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, []);
+
+    // ============== LIFECYCLE ==============
+    useEffect(() => {
+        setMounted(true);
+        if (typeof window !== 'undefined') {
+            const savedConvId = localStorage.getItem(conversationKey);
+            if (savedConvId && !initialConversationId) {
+                loadMessages(savedConvId);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages, streamingContent, conversationEntries, scrollToBottom]);
+
+    // ============== LOAD MESSAGES ==============
     const loadMessages = useCallback(async (convId: string) => {
         setIsLoadingMessages(true);
         try {
@@ -342,7 +179,7 @@ export function useChat({
         }
     }, [projectId, onConversationChange, saveProcessingState, conversationKey]);
 
-    // Parse SSE chunk
+    // ============== SSE PARSING ==============
     const parseSSEChunk = useCallback((chunk: string): InteractiveEvent[] => {
         const events: InteractiveEvent[] = [];
         const lines = chunk.split('\n');
@@ -354,26 +191,55 @@ export function useChat({
             } else if (line.startsWith('data:') && currentEvent) {
                 try {
                     const data = JSON.parse(line.substring(5).trim());
-                    events.push({event: currentEvent, data});
+                    events.push({ event: currentEvent as any, data });
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
                 currentEvent = null;
             }
         }
-
         return events;
     }, []);
 
-    // Process SSE event (agent conversation)
+    // ============== EVENT PROCESSING ==============
     const processAgentEvent = useCallback((event: InteractiveEvent) => {
-        const {event: eventType, data} = event;
+        const { event: eventType, data } = event;
         const timestamp = data.timestamp || new Date().toISOString();
 
+        const getAgent = (agentType: string): AgentInfo => {
+            return AGENT_CONFIG[agentType as AgentType] || AGENT_CONFIG.conductor;
+        };
+
         switch (eventType) {
+            case 'agent_message':
+                addEntry({
+                    type: 'message',
+                    timestamp,
+                    agentType: data.from_agent as AgentType,
+                    toAgentType: data.to_agent as AgentType,
+                    message: data.message,
+                    messageType: data.message_type,
+                });
+                break;
+
+            case 'agent_handoff':
+                addEntry({
+                    type: 'handoff',
+                    timestamp,
+                    agentType: data.from_agent as AgentType,
+                    toAgentType: data.to_agent as AgentType,
+                    message: data.message,
+                });
+                break;
+
             case 'agent_thinking':
+            case 'intent_thinking':
+            case 'context_thinking':
+            case 'planning_thinking':
+            case 'step_thinking':
+            case 'validation_thinking':
                 setCurrentThinking({
-                    agent: getAgentInfo(data.agent),
+                    agent: getAgent(data.agent),
                     thought: data.thought,
                     actionType: data.action_type,
                     filePath: data.file_path,
@@ -381,49 +247,92 @@ export function useChat({
                 });
                 break;
 
-            case 'agent_message':
+            case 'intent_started':
+            case 'context_started':
+            case 'planning_started':
+            case 'execution_started':
+            case 'validation_started':
+                setCurrentThinking({
+                    agent: getAgent(data.agent),
+                    thought: data.message || 'Processing...',
+                    progress: 0,
+                });
+                addEntry({
+                    type: 'message',
+                    timestamp,
+                    agentType: data.agent as AgentType,
+                    message: data.message,
+                    messageType: 'greeting',
+                });
+                break;
+
+            case 'intent_analyzed':
+            case 'context_retrieved':
+            case 'plan_created':
+            case 'execution_completed':
+            case 'validation_result':
                 setCurrentThinking(null);
                 addEntry({
                     type: 'message',
                     timestamp,
                     agentType: data.agent as AgentType,
                     message: data.message,
-                    messageType: data.message_type || 'custom',
-                });
-                break;
-
-            case 'agent_handoff':
-                setCurrentThinking(null);
-                addEntry({
-                    type: 'message',
-                    timestamp,
-                    agentType: data.from_agent as AgentType,
-                    message: data.message,
-                    messageType: 'handoff',
-                    toAgent: data.to_agent as AgentType,
+                    messageType: 'completion',
                 });
                 break;
 
             case 'step_started':
-            case 'step_completed':
+                setCurrentThinking({
+                    agent: AGENT_CONFIG.forge,
+                    thought: data.step?.description || 'Working...',
+                    actionType: data.step?.action,
+                    filePath: data.step?.file,
+                    progress: 0,
+                });
                 addEntry({
-                    type: 'action',
+                    type: 'step',
                     timestamp,
                     agentType: 'forge',
-                    actionType: data.step?.action || 'execute',
+                    actionType: data.step?.action,
                     filePath: data.step?.file,
                     message: data.step?.description,
-                    isComplete: eventType === 'step_completed',
+                    completed: false,
                 });
                 break;
 
-            case 'validation_issue_found':
+            case 'step_completed':
+                setCurrentThinking(null);
+                setConversationEntries((prev) => {
+                    const updated = [...prev];
+                    for (let i = updated.length - 1; i >= 0; i--) {
+                        if (updated[i].type === 'step' && !updated[i].completed) {
+                            updated[i] = { ...updated[i], completed: true };
+                            break;
+                        }
+                    }
+                    return updated;
+                });
+                if (data.result) {
+                    setExecutionResults((prev) => [...prev, data.result]);
+                }
+                break;
+
+            case 'plan_ready':
+                setCurrentThinking(null);
                 addEntry({
-                    type: 'message',
+                    type: 'system',
                     timestamp,
-                    agentType: 'guardian',
-                    message: `Found issue: ${data.issue?.message}`,
-                    messageType: 'error',
+                    message: 'Plan ready for review. Please approve to continue.',
+                    systemType: 'info',
+                });
+                break;
+
+            case 'plan_approved':
+                addEntry({
+                    type: 'system',
+                    timestamp,
+                    message: 'Plan approved! Starting execution...',
+                    systemType: 'success',
                 });
                 break;
 
@@ -451,11 +360,8 @@ export function useChat({
         }
     }, [addEntry]);
 
-    // Handle SSE event
     const handleEvent = useCallback((event: InteractiveEvent) => {
-        const {event: eventType, data} = event;
-
-        // Process agent conversation events
+        const { event: eventType, data } = event;
         processAgentEvent(event);
 
         switch (eventType) {
@@ -465,9 +371,6 @@ export function useChat({
                     onConversationChange?.(data.conversation_id);
                     localStorage.setItem(conversationKey, data.conversation_id);
                     saveProcessingState(true, data.conversation_id);
-                }
-                if (data.agents) {
-                    setAgents(data.agents);
                 }
                 break;
 
@@ -492,7 +395,7 @@ export function useChat({
 
             case 'answer_chunk':
                 if (data.chunk) {
-                    setStreamingContent(prev => prev + data.chunk);
+                    setStreamingContent((prev) => prev + data.chunk);
                 }
                 break;
 
@@ -517,11 +420,10 @@ export function useChat({
                             validation: data.validation,
                             success: data.success,
                             error: data.error,
-                            agent_timeline: data.agent_timeline,
-                            agent_activity: [...conversationEntriesRef.current],
+                            agent_activity: [...conversationEntries],
                         },
                     };
-                    setMessages(prev => [...prev, assistantMessage]);
+                    setMessages((prev) => [...prev, assistantMessage]);
                     setStreamingContent('');
                     setValidationResult(data.validation || null);
                 }
@@ -535,48 +437,48 @@ export function useChat({
                 setError(data.message || 'An error occurred');
                 break;
         }
-    }, [processAgentEvent, onConversationChange, conversationKey, saveProcessingState]);
+    }, [processAgentEvent, onConversationChange, conversationKey, saveProcessingState, conversationEntries]);
 
-    // Send message
+    // ============== SEND MESSAGE ==============
     const sendMessage = useCallback(async (messageText?: string) => {
-        const text = messageText || input;
-        if (!text.trim() || isLoading) return;
+        const text = messageText || input.trim();
+        if (!text || isLoading) return;
 
-        setInput('');
+        setError(null);
         setIsLoading(true);
         setIsStreaming(true);
         setStreamingContent('');
-        setError(null);
         clearEntries();
-        setValidationResult(null);
+        setExecutionResults([]);
 
-        // Add user message
-        const newUserMessage: Message = {
+        const userMessage: Message = {
             id: `msg-${Date.now()}`,
             role: 'user',
-            content: text.trim(),
+            content: text,
             timestamp: new Date(),
         };
-        setMessages(prev => [...prev, newUserMessage]);
+        setMessages((prev) => [...prev, userMessage]);
+        setInput('');
 
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-            const response = await fetch(
-                `${apiUrl}/projects/${projectId}/chat`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`,
-                    },
-                    body: JSON.stringify({
-                        message: text.trim(),
-                        conversation_id: conversationId,
-                        interactive_mode: true,
-                        require_plan_approval: requirePlanApproval,
-                    }),
-                }
-            );
+            abortControllerRef.current = new AbortController();
+            const chatUrl = chatApi.getChatUrl(projectId);
+            const authToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
+
+            const response = await fetch(chatUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({
+                    message: text,
+                    conversation_id: conversationId,
+                    interactive_mode: true,
+                    require_plan_approval: requirePlanApproval,
+                }),
+                signal: abortControllerRef.current.signal,
+            });
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -589,41 +491,30 @@ export function useChat({
             let buffer = '';
 
             while (true) {
-                const {done, value} = await reader.read();
+                const { done, value } = await reader.read();
                 if (done) break;
 
-                buffer += decoder.decode(value, {stream: true});
-                const lines = buffer.split('\n\n');
-                buffer = lines.pop() || '';
-
-                for (const chunk of lines) {
-                    if (chunk.trim()) {
-                        const events = parseSSEChunk(chunk);
-                        for (const event of events) {
-                            handleEvent(event);
-                        }
-                    }
-                }
-            }
-
-            // Process remaining buffer
-            if (buffer.trim()) {
+                buffer += decoder.decode(value, { stream: true });
                 const events = parseSSEChunk(buffer);
+                buffer = '';
+
                 for (const event of events) {
                     handleEvent(event);
                 }
             }
-        } catch (err) {
-            console.error('Chat error:', err);
-            setIsStreaming(false);
-            setIsLoading(false);
-            saveProcessingState(false, null);
-            setError(getErrorMessage(err));
+        } catch (err: any) {
+            if (err.name !== 'AbortError') {
+                console.error('Chat error:', err);
+                setError(getErrorMessage(err));
+                setIsLoading(false);
+                setIsStreaming(false);
+                saveProcessingState(false, null);
+            }
         }
-    }, [input, isLoading, projectId, conversationId, requirePlanApproval, authToken, clearEntries, parseSSEChunk, handleEvent, saveProcessingState]);
+    }, [input, isLoading, projectId, conversationId, requirePlanApproval, parseSSEChunk, handleEvent, clearEntries, saveProcessingState]);
 
-    // Handle plan approval
-    const handlePlanApproval = useCallback(async (plan?: Plan) => {
+    // ============== PLAN APPROVAL ==============
+    const handlePlanApproval = useCallback(async (modifiedPlan?: Plan) => {
         if (!conversationId) return;
 
         setIsPlanApprovalLoading(true);
@@ -631,7 +522,7 @@ export function useChat({
             await chatApi.approvePlan(projectId, {
                 conversation_id: conversationId,
                 approved: true,
-                modified_plan: plan,
+                modified_plan: modifiedPlan,
             });
             setAwaitingPlanApproval(false);
             setCurrentPlan(null);
@@ -643,7 +534,6 @@ export function useChat({
         }
     }, [conversationId, projectId]);
 
-    // Handle plan rejection
     const handlePlanRejection = useCallback(async (reason?: string) => {
         if (!conversationId) return;
 
@@ -667,8 +557,10 @@ export function useChat({
         }
     }, [conversationId, projectId, saveProcessingState]);
 
-    // Start new chat
+    // ============== NEW CHAT ==============
     const startNewChat = useCallback(() => {
+        abortControllerRef.current?.abort();
+
         setMessages([]);
         setConversationId(null);
         setInput('');
@@ -679,24 +571,27 @@ export function useChat({
         setAwaitingPlanApproval(false);
         setCurrentPlan(null);
         setValidationResult(null);
+        setExecutionResults([]);
         clearEntries();
         setCurrentThinking(null);
+
         localStorage.removeItem(conversationKey);
         localStorage.removeItem(processingStateKey);
         onConversationChange?.(null);
+
+        inputRef.current?.focus();
     }, [conversationKey, processingStateKey, clearEntries, onConversationChange]);
 
-    // Auto-scroll
-    const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, []);
-
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages, streamingContent, conversationEntries, scrollToBottom]);
+    // ============== ABORT ==============
+    const abort = useCallback(() => {
+        abortControllerRef.current?.abort();
+        setIsLoading(false);
+        setIsStreaming(false);
+        setCurrentThinking(null);
+        saveProcessingState(false, null);
+    }, [saveProcessingState]);
 
     return {
-        // State
         messages,
         input,
         setInput,
@@ -707,26 +602,23 @@ export function useChat({
         error,
         isLoadingMessages,
         mounted,
-        // Agent conversation
         conversationEntries,
         currentThinking,
-        // Plan approval
         awaitingPlanApproval,
         currentPlan,
         isPlanApprovalLoading,
-        // Validation
         validationResult,
-        // Agents
-        agents,
-        // Refs
+        executionResults,
         messagesEndRef,
-        // Actions
+        inputRef,
         sendMessage,
         handlePlanApproval,
         handlePlanRejection,
         startNewChat,
         loadMessages,
-        loadConversation: loadMessages,
         clearError,
+        abort,
     };
 }
+
+export default useChat;

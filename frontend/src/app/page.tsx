@@ -320,7 +320,7 @@ export default function LandingPage() {
                             <span className="block mt-2">
                 <span className="relative">
                   <span
-                      className="bg-gradient-to-r from-[#FF2D20] via-[#E07850] to-[#FF2D20] bg-clip-text text-transparent">6 AI Agents Strong</span>
+                      className="bg-gradient-to-r from-[#FF2D20] via-[#E07850] to-[#FF2D20] bg-clip-text text-transparent">AI Agents Strong</span>
                   <svg className="absolute -bottom-2 left-0 w-full h-3 text-[#FF2D20]/30" viewBox="0 0 200 12"
                        preserveAspectRatio="none">
                     <path d="M0,8 Q50,0 100,8 T200,8" fill="none" stroke="currentColor" strokeWidth="3"/>
