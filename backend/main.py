@@ -1,105 +1,127 @@
 """
 Laravel AI - FastAPI Application Entry Point
 """
+"""
+FastAPI application entry point with all routers.
+"""
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import init_db, close_db
 from app.core.logging import setup_logging, RequestLoggingMiddleware
-from app.core.exceptions import register_exception_handlers
-from app.api import auth, health, projects, chat, github, git, git_changes, usage
-
-
-# Initialize logging with configuration
-setup_logging(
-    log_level="DEBUG" if settings.debug else settings.log_level,
-    log_dir=settings.log_dir if settings.log_dir else None,
-    json_logs=settings.log_json,
-    app_name="laravelai",
+from app.api import (
+    auth,
+    github,
+    projects,
+    chat,
+    git,
+    git_changes,
+    usage,
+    health,
+    teams,
+    github_data,
 )
 
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan - startup and shutdown events."""
-    # Startup
-    logger.info(f"Starting {settings.app_name}...")
-    logger.info(f"Debug mode: {settings.debug}")
-    logger.info(f"Frontend URL: {settings.frontend_url}")
-    await init_db()
-    logger.info("Database initialized")
-
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    logger.info("Starting Laravel AI Backend...")
     yield
-
-    # Shutdown
-    logger.info("Shutting down...")
-    await close_db()
-    logger.info("Cleanup complete")
+    logger.info("Shutting down Laravel AI Backend...")
 
 
+# Create FastAPI app
 app = FastAPI(
-    title=settings.app_name,
-    description="AI-powered Laravel code modification assistant",
-    version="0.1.0",
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
+    title="Laravel AI Backend",
+    description="AI-powered Laravel development assistant",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
-# Register global exception handlers
-register_exception_handlers(app)
-
-# CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Request logging middleware
+# Add request logging
 app.add_middleware(RequestLoggingMiddleware)
 
-# Include routers
-app.include_router(health.router, tags=["Health"])
-app.include_router(auth.router, prefix=f"{settings.api_prefix}/auth", tags=["Auth"])
+# Register routers
+app.include_router(health.router, tags=["health"])
+
 app.include_router(
-    projects.router, prefix=f"{settings.api_prefix}/projects", tags=["Projects"]
+    auth.router,
+    prefix="/api/v1/auth",
+    tags=["auth"],
 )
+
 app.include_router(
-    github.router, prefix=f"{settings.api_prefix}/github", tags=["GitHub"]
+    github.router,
+    prefix="/api/v1/github",
+    tags=["github"],
 )
-# Chat routes under /projects/{id}/chat
+
 app.include_router(
-    chat.router, prefix=f"{settings.api_prefix}/projects", tags=["Chat"]
+    projects.router,
+    prefix="/api/v1/projects",
+    tags=["projects"],
 )
-# Git routes under /projects/{id}/...
+
 app.include_router(
-    git.router, prefix=f"{settings.api_prefix}/projects", tags=["Git"]
+    chat.router,
+    prefix="/api/v1/projects",
+    tags=["chat"],
 )
-# Git changes tracking routes under /projects/{id}/changes
+
+app.include_router(
+    git.router,
+    prefix="/api/v1",
+    tags=["git"],
+)
+
 app.include_router(
     git_changes.router, prefix=f"{settings.api_prefix}/projects", tags=["Git Changes"]
 )
-# AI usage tracking routes
+
 app.include_router(
     usage.router, prefix=f"{settings.api_prefix}/usage", tags=["Usage"]
 )
 
+# NEW: GitHub data (issues, actions, projects, insights)
+app.include_router(
+    github_data.router,
+    prefix="/api/v1/github-data",
+    tags=["github-data"],
+)
+
+
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "service": "Laravel AI Backend",
+        "version": "1.0.0",
+        "status": "running",
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
-        "main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
     )

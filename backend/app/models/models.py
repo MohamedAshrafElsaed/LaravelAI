@@ -3,9 +3,11 @@ SQLAlchemy models for Laravel AI.
 """
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from uuid import uuid4
 
+from app.models.github_models import GitHubIssue, GitHubAction, GitHubProject, GitHubWikiPage, GitHubInsights
+from app.models.team_models import Team, TeamMember
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, Integer, String, Text,
     Enum as SQLEnum, Index, JSON, Float, Numeric, Date
@@ -79,6 +81,16 @@ class User(Base):
     )
     conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
+    )
+    owned_teams: Mapped[List["Team"]] = relationship(
+        "Team",
+        back_populates="owner",
+        foreign_keys="Team.owner_id"
+    )
+    team_memberships: Mapped[List["TeamMember"]] = relationship(
+        "TeamMember",
+        back_populates="user",
+        foreign_keys="TeamMember.user_id"
     )
 
 
@@ -167,6 +179,43 @@ class Project(Base):
     )
     git_changes: Mapped[list["GitChange"]] = relationship(
         "GitChange", back_populates="project", cascade="all, delete-orphan"
+    )
+    # Team reference (ADD THIS FIELD)
+    team_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=True
+    )
+
+    # Team relationship (ADD THIS)
+    team: Mapped[Optional["Team"]] = relationship("Team", back_populates="projects")
+
+    # GitHub data relationships (ADD THESE)
+    github_issues: Mapped[List["GitHubIssue"]] = relationship(
+        "GitHubIssue",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    github_actions: Mapped[List["GitHubAction"]] = relationship(
+        "GitHubAction",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    github_projects_list: Mapped[List["GitHubProject"]] = relationship(
+        "GitHubProject",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    github_wiki_pages: Mapped[List["GitHubWikiPage"]] = relationship(
+        "GitHubWikiPage",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    github_insights: Mapped[Optional["GitHubInsights"]] = relationship(
+        "GitHubInsights",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan"
     )
 
     __table_args__ = (

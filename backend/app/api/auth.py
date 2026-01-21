@@ -1,4 +1,9 @@
-"""GitHub OAuth authentication routes."""
+# ============================================================================
+# FILE: backend/app/api/auth.py (UPDATED)
+# ============================================================================
+"""
+GitHub OAuth authentication routes with automatic team creation.
+"""
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -18,6 +23,7 @@ from app.core.security import (
     get_current_user,
 )
 from app.models.models import User
+from app.services.team_service import TeamService
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +43,18 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     avatar_url: Optional[str] = None
+    has_personal_team: bool = False
 
     class Config:
         from_attributes = True
 
 
-class CodeExchangeRequest(BaseModel):
-    """Request model for code exchange."""
-    code: str
+class TeamInfoResponse(BaseModel):
+    """Team info in auth response."""
+    id: str
+    name: str
+    slug: str
+    is_personal: bool
 
 
 class AuthResponse(BaseModel):
@@ -52,6 +62,12 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+    personal_team: Optional[TeamInfoResponse] = None
+
+
+class CodeExchangeRequest(BaseModel):
+    """Request model for code exchange."""
+    code: str
 
 
 @router.get("/github")
@@ -66,7 +82,7 @@ async def github_login():
         f"https://github.com/login/oauth/authorize"
         f"?client_id={settings.github_client_id}"
         f"&redirect_uri={settings.github_redirect_uri}"
-        f"&scope=repo,read:user,user:email"
+        f"&scope=repo,read:user,user:email,read:org"
     )
     return RedirectResponse(url=github_auth_url)
 
@@ -83,9 +99,12 @@ async def github_callback(
     1. Exchanges the authorization code for an access token
     2. Fetches user information from GitHub
     3. Creates or updates the user in our database
-    4. Returns a JWT for subsequent API requests
+    4. Creates a personal team for new users
+    5. Returns a JWT token for authentication
     """
-    # Exchange code for access token
+    logger.info("[AUTH] GitHub callback received")
+
+    # Exchange code for GitHub access token
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
             "https://github.com/login/oauth/access_token",
@@ -93,36 +112,29 @@ async def github_callback(
                 "client_id": settings.github_client_id,
                 "client_secret": settings.github_client_secret,
                 "code": code,
+                "redirect_uri": settings.github_redirect_uri,
             },
             headers={"Accept": "application/json"},
         )
 
         if token_response.status_code != 200:
+            logger.error(f"[AUTH] GitHub token exchange failed: {token_response.text}")
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate with GitHub",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to exchange code for token",
             )
 
         token_data = token_response.json()
         github_token = token_data.get("access_token")
 
         if not github_token:
-            error = token_data.get("error_description", "No access token received")
+            logger.error(f"[AUTH] No access token in response: {token_data}")
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"GitHub OAuth error: {error}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No access token received from GitHub",
             )
 
-        # Extract refresh token and expiration if available
-        # (requires token expiration enabled on GitHub OAuth app)
-        github_refresh_token = token_data.get("refresh_token")
-        expires_in = token_data.get("expires_in")  # Seconds until expiration
-        token_expires_at = None
-        if expires_in:
-            token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
-            logger.info(f"[AUTH] Token will expire in {expires_in} seconds")
-
-        # Get user info from GitHub
+        # Fetch user info from GitHub
         user_response = await client.get(
             "https://api.github.com/user",
             headers={
@@ -132,120 +144,123 @@ async def github_callback(
         )
 
         if user_response.status_code != 200:
+            logger.error(f"[AUTH] GitHub user fetch failed: {user_response.text}")
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to fetch user info from GitHub",
             )
 
         github_user = user_response.json()
 
-        # Get user email (may be private)
-        email_response = await client.get(
-            "https://api.github.com/user/emails",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/json",
-            },
-        )
-        emails = email_response.json() if email_response.status_code == 200 else []
-        primary_email = next(
-            (e["email"] for e in emails if e.get("primary")), None
-        )
+        # Fetch user email if not public
+        email = github_user.get("email")
+        if not email:
+            emails_response = await client.get(
+                "https://api.github.com/user/emails",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/json",
+                },
+            )
+            if emails_response.status_code == 200:
+                emails = emails_response.json()
+                primary_email = next(
+                    (e for e in emails if e.get("primary")), None
+                )
+                if primary_email:
+                    email = primary_email.get("email")
 
-    # Encrypt the GitHub token before storage
-    encrypted_token = encrypt_token(github_token)
-    encrypted_refresh_token = encrypt_token(github_refresh_token) if github_refresh_token else None
-
-    # Find or create user
+    # Check if user exists
     stmt = select(User).where(User.github_id == github_user["id"])
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
+    is_new_user = user is None
+
     if user:
         # Update existing user
-        user.github_access_token = encrypted_token
+        logger.info(f"[AUTH] Updating existing user: {github_user['login']}")
+        user.username = github_user["login"]
+        user.email = email
         user.avatar_url = github_user.get("avatar_url")
-        user.username = github_user["login"]  # Username might change
-        if primary_email:
-            user.email = primary_email
-        # Update refresh token and expiration
-        if encrypted_refresh_token:
-            user.github_refresh_token = encrypted_refresh_token
-        user.github_token_expires_at = token_expires_at
+        user.github_token_encrypted = encrypt_token(github_token)
+        user.github_token_expires_at = datetime.utcnow() + timedelta(hours=8)
+        user.updated_at = datetime.utcnow()
     else:
         # Create new user
+        logger.info(f"[AUTH] Creating new user: {github_user['login']}")
         user = User(
             github_id=github_user["id"],
             username=github_user["login"],
-            email=primary_email,
+            email=email,
             avatar_url=github_user.get("avatar_url"),
-            github_access_token=encrypted_token,
-            github_refresh_token=encrypted_refresh_token,
-            github_token_expires_at=token_expires_at,
+            github_token_encrypted=encrypt_token(github_token),
+            github_token_expires_at=datetime.utcnow() + timedelta(hours=8),
         )
         db.add(user)
 
-    await db.flush()
+    await db.commit()
+    await db.refresh(user)
 
-    # Create our JWT (7-day expiry configured in settings)
-    access_token = create_access_token(user.id)
+    # Create personal team for new users
+    team_service = TeamService(db)
+    personal_team = await team_service.get_user_personal_team(str(user.id))
+    
+    if not personal_team:
+        logger.info(f"[AUTH] Creating personal team for user: {user.username}")
+        personal_team = await team_service.create_personal_team(user)
+
+    # Create JWT token
+    access_token = create_access_token(data={"sub": str(user.id)})
+
+    logger.info(f"[AUTH] Authentication successful for user: {user.username}")
 
     # Redirect to frontend with token
-    redirect_url = f"{settings.frontend_url}/auth/success?token={access_token}"
+    redirect_url = f"{settings.frontend_url}/auth/callback?token={access_token}"
     return RedirectResponse(url=redirect_url)
 
 
-@router.post("/github/callback", response_model=AuthResponse)
-async def github_callback_post(
+@router.post("/exchange", response_model=AuthResponse)
+async def exchange_code(
     request: CodeExchangeRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Handle GitHub OAuth callback via POST (for frontend-initiated flow).
-
-    This endpoint accepts the authorization code in the request body
-    and returns the JWT token directly instead of redirecting.
+    Exchange authorization code for access token (for SPA flow).
+    
+    This is an alternative to the callback redirect for single-page apps
+    that handle the OAuth flow themselves.
     """
-    code = request.code
+    logger.info("[AUTH] Code exchange requested")
 
-    # Exchange code for access token
     async with httpx.AsyncClient() as client:
+        # Exchange code for GitHub token
         token_response = await client.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": settings.github_client_id,
                 "client_secret": settings.github_client_secret,
-                "code": code,
+                "code": request.code,
             },
             headers={"Accept": "application/json"},
         )
 
         if token_response.status_code != 200:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate with GitHub",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to exchange code for token",
             )
 
         token_data = token_response.json()
         github_token = token_data.get("access_token")
 
         if not github_token:
-            error = token_data.get("error_description", "No access token received")
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"GitHub OAuth error: {error}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No access token received",
             )
 
-        # Extract refresh token and expiration if available
-        # (requires token expiration enabled on GitHub OAuth app)
-        github_refresh_token = token_data.get("refresh_token")
-        expires_in = token_data.get("expires_in")  # Seconds until expiration
-        token_expires_at = None
-        if expires_in:
-            token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
-            logger.info(f"[AUTH] Token will expire in {expires_in} seconds")
-
-        # Get user info from GitHub
+        # Fetch user info
         user_response = await client.get(
             "https://api.github.com/user",
             headers={
@@ -256,28 +271,27 @@ async def github_callback_post(
 
         if user_response.status_code != 200:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to fetch user info from GitHub",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to fetch user info",
             )
 
         github_user = user_response.json()
 
-        # Get user email (may be private)
-        email_response = await client.get(
-            "https://api.github.com/user/emails",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/json",
-            },
-        )
-        emails = email_response.json() if email_response.status_code == 200 else []
-        primary_email = next(
-            (e["email"] for e in emails if e.get("primary")), None
-        )
-
-    # Encrypt the GitHub token before storage
-    encrypted_token = encrypt_token(github_token)
-    encrypted_refresh_token = encrypt_token(github_refresh_token) if github_refresh_token else None
+        # Fetch email
+        email = github_user.get("email")
+        if not email:
+            emails_response = await client.get(
+                "https://api.github.com/user/emails",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/json",
+                },
+            )
+            if emails_response.status_code == 200:
+                emails = emails_response.json()
+                primary = next((e for e in emails if e.get("primary")), None)
+                if primary:
+                    email = primary.get("email")
 
     # Find or create user
     stmt = select(User).where(User.github_id == github_user["id"])
@@ -285,60 +299,89 @@ async def github_callback_post(
     user = result.scalar_one_or_none()
 
     if user:
-        # Update existing user
-        user.github_access_token = encrypted_token
-        user.avatar_url = github_user.get("avatar_url")
         user.username = github_user["login"]
-        if primary_email:
-            user.email = primary_email
-        # Update refresh token and expiration
-        if encrypted_refresh_token:
-            user.github_refresh_token = encrypted_refresh_token
-        user.github_token_expires_at = token_expires_at
+        user.email = email
+        user.avatar_url = github_user.get("avatar_url")
+        user.github_token_encrypted = encrypt_token(github_token)
+        user.github_token_expires_at = datetime.utcnow() + timedelta(hours=8)
+        user.updated_at = datetime.utcnow()
     else:
-        # Create new user
         user = User(
             github_id=github_user["id"],
             username=github_user["login"],
-            email=primary_email,
+            email=email,
             avatar_url=github_user.get("avatar_url"),
-            github_access_token=encrypted_token,
-            github_refresh_token=encrypted_refresh_token,
-            github_token_expires_at=token_expires_at,
+            github_token_encrypted=encrypt_token(github_token),
+            github_token_expires_at=datetime.utcnow() + timedelta(hours=8),
         )
         db.add(user)
 
-    await db.flush()
+    await db.commit()
+    await db.refresh(user)
+
+    # Create/get personal team
+    team_service = TeamService(db)
+    personal_team = await team_service.get_user_personal_team(str(user.id))
+    
+    if not personal_team:
+        personal_team = await team_service.create_personal_team(user)
 
     # Create JWT
-    access_token = create_access_token(user.id)
+    access_token = create_access_token(data={"sub": str(user.id)})
 
     return AuthResponse(
         access_token=access_token,
+        token_type="bearer",
         user=UserResponse(
-            id=user.id,
+            id=str(user.id),
             username=user.username,
             email=user.email,
             avatar_url=user.avatar_url,
+            has_personal_team=True,
+        ),
+        personal_team=TeamInfoResponse(
+            id=personal_team.id,
+            name=personal_team.name,
+            slug=personal_team.slug,
+            is_personal=personal_team.is_personal,
         ),
     )
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_me(
+@router.get("/me", response_model=AuthResponse)
+async def get_current_user_info(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get the current authenticated user.
+    """Get current user info including team."""
+    team_service = TeamService(db)
+    personal_team = await team_service.get_user_personal_team(str(current_user.id))
 
-    Requires a valid JWT in the Authorization header.
-
-    Returns:
-        UserResponse: The authenticated user's public profile data
-    """
-    return UserResponse(
-        id=current_user.id,
-        username=current_user.username,
-        email=current_user.email,
-        avatar_url=current_user.avatar_url,
+    return AuthResponse(
+        access_token="",  # Not returned for security
+        token_type="bearer",
+        user=UserResponse(
+            id=str(current_user.id),
+            username=current_user.username,
+            email=current_user.email,
+            avatar_url=current_user.avatar_url,
+            has_personal_team=personal_team is not None,
+        ),
+        personal_team=TeamInfoResponse(
+            id=personal_team.id,
+            name=personal_team.name,
+            slug=personal_team.slug,
+            is_personal=personal_team.is_personal,
+        ) if personal_team else None,
     )
+
+
+@router.post("/logout")
+async def logout():
+    """
+    Logout endpoint.
+    
+    Since we use JWT tokens, the actual logout happens client-side
+    by removing the token. This endpoint is here for completeness.
+    """
+    return {"message": "Logged out successfully"}
