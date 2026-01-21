@@ -1,21 +1,21 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {
-    ChevronRight,
     ChevronDown,
-    Folder,
-    FolderOpen,
+    ChevronRight,
+    Database,
     File,
     FileCode,
     FileText,
-    Database,
+    Folder,
+    FolderOpen,
     Layout,
-    Settings,
     RefreshCw,
     Search,
+    Settings,
 } from 'lucide-react';
-import { filesApi } from '@/lib/api';
+import {filesApi} from '@/lib/api';
 
 // ============== TYPES ==============
 export interface FileNode {
@@ -38,30 +38,30 @@ const getFileIcon = (fileName: string) => {
 
     switch (ext) {
         case 'php':
-            return <FileCode className="h-4 w-4 text-purple-400" />;
+            return <FileCode className="h-4 w-4 text-purple-400"/>;
         case 'blade':
-            return <Layout className="h-4 w-4 text-orange-400" />;
+            return <Layout className="h-4 w-4 text-orange-400"/>;
         case 'vue':
         case 'jsx':
         case 'tsx':
-            return <FileCode className="h-4 w-4 text-green-400" />;
+            return <FileCode className="h-4 w-4 text-green-400"/>;
         case 'js':
         case 'ts':
-            return <FileCode className="h-4 w-4 text-yellow-400" />;
+            return <FileCode className="h-4 w-4 text-yellow-400"/>;
         case 'css':
         case 'scss':
         case 'sass':
-            return <FileText className="h-4 w-4 text-blue-400" />;
+            return <FileText className="h-4 w-4 text-blue-400"/>;
         case 'json':
         case 'yaml':
         case 'yml':
-            return <Settings className="h-4 w-4 text-gray-400" />;
+            return <Settings className="h-4 w-4 text-gray-400"/>;
         case 'sql':
-            return <Database className="h-4 w-4 text-cyan-400" />;
+            return <Database className="h-4 w-4 text-cyan-400"/>;
         case 'md':
-            return <FileText className="h-4 w-4 text-gray-400" />;
+            return <FileText className="h-4 w-4 text-gray-400"/>;
         default:
-            return <File className="h-4 w-4 text-gray-400" />;
+            return <File className="h-4 w-4 text-gray-400"/>;
     }
 };
 
@@ -122,29 +122,29 @@ function TreeNode({
                         ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)]'
                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-text-primary)]'
                 }`}
-                style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                style={{paddingLeft: `${depth * 12 + 8}px`}}
                 onClick={handleClick}
             >
                 {/* Expand/collapse icon */}
                 {isDirectory ? (
                     <span className="w-4 flex-shrink-0">
             {isExpanded ? (
-                <ChevronDown className="h-4 w-4 text-[var(--color-text-secondary)]" />
+                <ChevronDown className="h-4 w-4 text-[var(--color-text-secondary)]"/>
             ) : (
-                <ChevronRight className="h-4 w-4 text-[var(--color-text-secondary)]" />
+                <ChevronRight className="h-4 w-4 text-[var(--color-text-secondary)]"/>
             )}
           </span>
                 ) : (
-                    <span className="w-4 flex-shrink-0" />
+                    <span className="w-4 flex-shrink-0"/>
                 )}
 
                 {/* File/folder icon */}
                 <span className="flex-shrink-0">
           {isDirectory ? (
               isExpanded ? (
-                  <FolderOpen className="h-4 w-4 text-yellow-500" />
+                  <FolderOpen className="h-4 w-4 text-yellow-500"/>
               ) : (
-                  <Folder className="h-4 w-4 text-yellow-500" />
+                  <Folder className="h-4 w-4 text-yellow-500"/>
               )
           ) : (
               getFileIcon(node.name)
@@ -184,7 +184,7 @@ function TreeNode({
 }
 
 // ============== MAIN FILE TREE COMPONENT ==============
-export default function FileTree({ projectId, onFileSelect, selectedFile }: FileTreeProps) {
+export default function FileTree({projectId, onFileSelect, selectedFile}: FileTreeProps) {
     const [tree, setTree] = useState<FileNode[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -254,7 +254,7 @@ export default function FileTree({ projectId, onFileSelect, selectedFile }: File
                 if (node.type === 'directory' && node.children) {
                     const filteredChildren = filterTree(node.children, query);
                     if (filteredChildren.length > 0) {
-                        return { ...node, children: filteredChildren };
+                        return {...node, children: filteredChildren};
                     }
                 }
                 if (node.name.toLowerCase().includes(query.toLowerCase())) {
@@ -271,7 +271,7 @@ export default function FileTree({ projectId, onFileSelect, selectedFile }: File
     if (loading) {
         return (
             <div className="flex items-center justify-center h-full">
-                <RefreshCw className="h-5 w-5 animate-spin text-[var(--color-text-secondary)]" />
+                <RefreshCw className="h-5 w-5 animate-spin text-[var(--color-text-secondary)]"/>
             </div>
         );
     }
@@ -296,7 +296,8 @@ export default function FileTree({ projectId, onFileSelect, selectedFile }: File
             {/* Search */}
             <div className="p-2 border-b border-[var(--color-border)]">
                 <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-secondary)]" />
+                    <Search
+                        className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-secondary)]"/>
                     <input
                         type="text"
                         value={searchQuery}
@@ -334,7 +335,7 @@ export default function FileTree({ projectId, onFileSelect, selectedFile }: File
                     onClick={fetchTree}
                     className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] rounded transition-colors"
                 >
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-4 w-4"/>
                     Refresh
                 </button>
             </div>
@@ -342,4 +343,4 @@ export default function FileTree({ projectId, onFileSelect, selectedFile }: File
     );
 }
 
-export { getLanguageFromPath };
+export {getLanguageFromPath};

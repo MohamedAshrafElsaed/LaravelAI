@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, AlertCircle, Info, FileCode, ArrowRight, Loader2 } from 'lucide-react';
-import type { ConversationEntry, AgentThinkingState, AgentType } from './types';
-import { AgentBadge, AgentAvatar, AgentThinking, AGENT_CONFIG } from './AgentBadge';
+import React, {useMemo} from 'react';
+import {AnimatePresence, motion} from 'framer-motion';
+import {AlertCircle, ArrowRight, CheckCircle, FileCode, Info, Loader2} from 'lucide-react';
+import type {AgentThinkingState, AgentType, ConversationEntry} from './types';
+import {AGENT_CONFIG, AgentAvatar, AgentBadge, AgentThinking} from './AgentBadge';
 
 // ============== AGENT TIMELINE ==============
 interface AgentTimelineProps {
@@ -14,7 +14,7 @@ interface AgentTimelineProps {
     maxEntries?: number;
 }
 
-export function AgentTimeline({ entries, currentThinking, compact = false, maxEntries }: AgentTimelineProps) {
+export function AgentTimeline({entries, currentThinking, compact = false, maxEntries}: AgentTimelineProps) {
     const displayEntries = useMemo(() => {
         if (maxEntries && entries.length > maxEntries) {
             return entries.slice(-maxEntries);
@@ -27,13 +27,15 @@ export function AgentTimeline({ entries, currentThinking, compact = false, maxEn
     }
 
     return (
-        <div className={`rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] overflow-hidden ${compact ? 'text-xs' : ''}`}>
+        <div
+            className={`rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] overflow-hidden ${compact ? 'text-xs' : ''}`}>
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <div
+                className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <div className="flex items-center gap-2">
                     <div className="flex -space-x-1">
                         {getUniqueAgents(displayEntries).map((agent) => (
-                            <AgentAvatar key={agent} agent={agent} size="sm" />
+                            <AgentAvatar key={agent} agent={agent} size="sm"/>
                         ))}
                     </div>
                     <span className="text-sm font-medium text-[var(--color-text-secondary)]">
@@ -49,16 +51,18 @@ export function AgentTimeline({ entries, currentThinking, compact = false, maxEn
             <div className={`p-3 space-y-2 ${compact ? 'max-h-48' : 'max-h-64'} overflow-y-auto`}>
                 <AnimatePresence mode="popLayout">
                     {displayEntries.map((entry, index) => (
-                        <TimelineEntry key={entry.id} entry={entry} isLast={index === displayEntries.length - 1 && !currentThinking} compact={compact} />
+                        <TimelineEntry key={entry.id} entry={entry}
+                                       isLast={index === displayEntries.length - 1 && !currentThinking}
+                                       compact={compact}/>
                     ))}
 
                     {/* Current thinking */}
                     {currentThinking && (
                         <motion.div
                             key="thinking"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
+                            initial={{opacity: 0, y: 10}}
+                            animate={{opacity: 1, y: 0}}
+                            exit={{opacity: 0, y: -10}}
                         >
                             <AgentThinking
                                 agent={currentThinking.agent.type}
@@ -82,7 +86,7 @@ interface TimelineEntryProps {
     compact?: boolean;
 }
 
-function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
+function TimelineEntry({entry, isLast, compact = false}: TimelineEntryProps) {
     const formatTime = (timestamp: string) => {
         const date = new Date(timestamp);
         return date.toLocaleTimeString('en-US', {
@@ -97,23 +101,25 @@ function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
         case 'message':
             return (
                 <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
+                    initial={{opacity: 0, x: -10}}
+                    animate={{opacity: 1, x: 0}}
+                    exit={{opacity: 0, x: 10}}
                     className="flex items-start gap-2"
                 >
-                    {entry.agentType && <AgentAvatar agent={entry.agentType} size="sm" />}
+                    {entry.agentType && <AgentAvatar agent={entry.agentType} size="sm"/>}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             {entry.agentType && (
-                                <span className={`font-medium text-sm ${AGENT_CONFIG[entry.agentType]?.color || 'text-gray-400'}`}>
+                                <span
+                                    className={`font-medium text-sm ${AGENT_CONFIG[entry.agentType]?.color || 'text-gray-400'}`}>
                   {AGENT_CONFIG[entry.agentType]?.name || entry.agentType}
                 </span>
                             )}
                             {entry.toAgentType && (
                                 <>
-                                    <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
-                                    <span className={`font-medium text-sm ${AGENT_CONFIG[entry.toAgentType]?.color || 'text-gray-400'}`}>
+                                    <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]"/>
+                                    <span
+                                        className={`font-medium text-sm ${AGENT_CONFIG[entry.toAgentType]?.color || 'text-gray-400'}`}>
                     {AGENT_CONFIG[entry.toAgentType]?.name || entry.toAgentType}
                   </span>
                                 </>
@@ -132,14 +138,14 @@ function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
         case 'handoff':
             return (
                 <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
+                    initial={{opacity: 0, scale: 0.95}}
+                    animate={{opacity: 1, scale: 1}}
+                    exit={{opacity: 0, scale: 0.95}}
                     className="flex items-center gap-2 py-1"
                 >
-                    {entry.agentType && <AgentBadge agent={entry.agentType} size="sm" showName={!compact} />}
-                    <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
-                    {entry.toAgentType && <AgentBadge agent={entry.toAgentType} size="sm" showName={!compact} />}
+                    {entry.agentType && <AgentBadge agent={entry.agentType} size="sm" showName={!compact}/>}
+                    <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]"/>
+                    {entry.toAgentType && <AgentBadge agent={entry.toAgentType} size="sm" showName={!compact}/>}
                     {!compact && entry.message && (
                         <span className="text-xs text-[var(--color-text-muted)] truncate">
               {entry.message}
@@ -151,9 +157,9 @@ function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
         case 'step':
             return (
                 <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
+                    initial={{opacity: 0, y: 5}}
+                    animate={{opacity: 1, y: 0}}
+                    exit={{opacity: 0, y: -5}}
                     className={`flex items-start gap-2 p-2 rounded-lg ${
                         entry.completed
                             ? 'bg-green-500/10 border border-green-500/20'
@@ -162,21 +168,22 @@ function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
                 >
                     <div className="mt-0.5">
                         {entry.completed ? (
-                            <CheckCircle className="h-4 w-4 text-green-400" />
+                            <CheckCircle className="h-4 w-4 text-green-400"/>
                         ) : (
-                            <Loader2 className="h-4 w-4 text-amber-400 animate-spin" />
+                            <Loader2 className="h-4 w-4 text-amber-400 animate-spin"/>
                         )}
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             {entry.actionType && (
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getActionColor(entry.actionType)}`}>
+                                <span
+                                    className={`px-1.5 py-0.5 rounded text-xs font-medium ${getActionColor(entry.actionType)}`}>
                   {entry.actionType}
                 </span>
                             )}
                             {entry.filePath && (
                                 <span className="text-xs text-blue-400 truncate flex items-center gap-1">
-                  <FileCode className="h-3 w-3" />
+                  <FileCode className="h-3 w-3"/>
                                     {entry.filePath}
                 </span>
                             )}
@@ -191,9 +198,9 @@ function TimelineEntry({ entry, isLast, compact = false }: TimelineEntryProps) {
         case 'system':
             return (
                 <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
+                    initial={{opacity: 0}}
+                    animate={{opacity: 1}}
+                    exit={{opacity: 0}}
                     className={`flex items-center gap-2 py-1 px-2 rounded-lg text-xs ${getSystemTypeStyles(entry.systemType)}`}
                 >
                     {getSystemIcon(entry.systemType)}
@@ -248,14 +255,14 @@ function getSystemTypeStyles(type?: string): string {
 function getSystemIcon(type?: string) {
     switch (type) {
         case 'success':
-            return <CheckCircle className="h-3.5 w-3.5 text-green-400" />;
+            return <CheckCircle className="h-3.5 w-3.5 text-green-400"/>;
         case 'warning':
-            return <AlertCircle className="h-3.5 w-3.5 text-amber-400" />;
+            return <AlertCircle className="h-3.5 w-3.5 text-amber-400"/>;
         case 'error':
-            return <AlertCircle className="h-3.5 w-3.5 text-red-400" />;
+            return <AlertCircle className="h-3.5 w-3.5 text-red-400"/>;
         case 'info':
         default:
-            return <Info className="h-3.5 w-3.5 text-blue-400" />;
+            return <Info className="h-3.5 w-3.5 text-blue-400"/>;
     }
 }
 
@@ -265,7 +272,7 @@ interface AgentSummaryBarProps {
     className?: string;
 }
 
-export function AgentSummaryBar({ entries, className = '' }: AgentSummaryBarProps) {
+export function AgentSummaryBar({entries, className = ''}: AgentSummaryBarProps) {
     const agentStats = useMemo(() => {
         const stats: Record<AgentType, number> = {} as Record<AgentType, number>;
         entries.forEach((entry) => {
@@ -282,7 +289,7 @@ export function AgentSummaryBar({ entries, className = '' }: AgentSummaryBarProp
         <div className={`flex items-center gap-2 ${className}`}>
             {Object.entries(agentStats).map(([agent, count]) => (
                 <div key={agent} className="flex items-center gap-1">
-                    <AgentBadge agent={agent as AgentType} size="sm" showName={false} />
+                    <AgentBadge agent={agent as AgentType} size="sm" showName={false}/>
                     <span className="text-xs text-[var(--color-text-muted)]">{count}</span>
                 </div>
             ))}

@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Send, Bot, User, Sparkles, Loader2, AlertCircle } from 'lucide-react';
-import { chatApi } from '@/lib/api';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {motion} from 'framer-motion';
+import {AlertCircle, Bot, Loader2, Send, Sparkles, User} from 'lucide-react';
+import {chatApi} from '@/lib/api';
 
 interface Message {
     id: string;
@@ -147,7 +147,7 @@ export default function DevChatPanel({
 
             if (reader) {
                 while (true) {
-                    const { done, value } = await reader.read();
+                    const {done, value} = await reader.read();
                     if (done) break;
 
                     const chunk = decoder.decode(value);
@@ -163,7 +163,7 @@ export default function DevChatPanel({
                                     setMessages(prev =>
                                         prev.map(msg =>
                                             msg.id === assistantMessageId
-                                                ? { ...msg, content: fullContent }
+                                                ? {...msg, content: fullContent}
                                                 : msg
                                         )
                                     );
@@ -178,7 +178,7 @@ export default function DevChatPanel({
                                     setMessages(prev =>
                                         prev.map(msg =>
                                             msg.id === assistantMessageId
-                                                ? { ...msg, isStreaming: false, codeBlock: codeBlock || undefined }
+                                                ? {...msg, isStreaming: false, codeBlock: codeBlock || undefined}
                                                 : msg
                                         )
                                     );
@@ -225,13 +225,14 @@ export default function DevChatPanel({
     return (
         <div className="flex flex-col h-full bg-[var(--color-bg-primary)] border-l border-[var(--color-border-subtle)]">
             {/* Header */}
-            <div className="h-10 flex items-center px-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-                <Sparkles size={14} className="text-[var(--color-primary)] mr-2" />
+            <div
+                className="h-10 flex items-center px-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+                <Sparkles size={14} className="text-[var(--color-primary)] mr-2"/>
                 <span className="text-xs font-bold text-[var(--color-text-primary)] uppercase tracking-wider">
           AI Assistant
         </span>
                 <span className="ml-auto text-[10px] font-mono text-green-500 flex items-center">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 animate-pulse"/>
                     {projectId ? 'READY' : 'SELECT PROJECT'}
         </span>
             </div>
@@ -241,8 +242,8 @@ export default function DevChatPanel({
                 {messages.map((msg) => (
                     <motion.div
                         key={msg.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
+                        initial={{opacity: 0, y: 10}}
+                        animate={{opacity: 1, y: 0}}
                         className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                     >
                         <div
@@ -261,14 +262,14 @@ export default function DevChatPanel({
                             >
                                 {msg.role === 'assistant' ? (
                                     msg.error ? (
-                                        <AlertCircle size={12} />
+                                        <AlertCircle size={12}/>
                                     ) : msg.isStreaming ? (
-                                        <Loader2 size={12} className="animate-spin" />
+                                        <Loader2 size={12} className="animate-spin"/>
                                     ) : (
-                                        <Bot size={12} />
+                                        <Bot size={12}/>
                                     )
                                 ) : (
-                                    <User size={12} />
+                                    <User size={12}/>
                                 )}
                             </div>
                             <span className="text-[10px] font-mono text-[var(--color-text-dimmer)]">
@@ -287,7 +288,8 @@ export default function DevChatPanel({
                         >
                             <p className="whitespace-pre-wrap">{msg.content || (msg.isStreaming ? '...' : '')}</p>
                             {msg.codeBlock && (
-                                <div className="mt-2 p-2 bg-[var(--color-code-bg)] rounded border border-[var(--color-border-subtle)] font-mono text-xs text-[var(--color-code-text)] whitespace-pre-wrap overflow-x-auto">
+                                <div
+                                    className="mt-2 p-2 bg-[var(--color-code-bg)] rounded border border-[var(--color-border-subtle)] font-mono text-xs text-[var(--color-code-text)] whitespace-pre-wrap overflow-x-auto">
                                     {msg.codeBlock}
                                 </div>
                             )}
@@ -314,9 +316,9 @@ export default function DevChatPanel({
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-dimmer)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? (
-                            <Loader2 size={14} className="animate-spin" />
+                            <Loader2 size={14} className="animate-spin"/>
                         ) : (
-                            <Send size={14} />
+                            <Send size={14}/>
                         )}
                     </button>
                 </div>

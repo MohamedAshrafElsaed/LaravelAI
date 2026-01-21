@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { useAuthStore } from '@/lib/store';
+import {useCallback, useState} from 'react';
+import {useAuthStore} from '@/lib/store';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -70,7 +70,7 @@ interface UseGitHubDataReturn {
 }
 
 export function useGitHubData(): UseGitHubDataReturn {
-    const { token } = useAuthStore();
+    const {token} = useAuthStore();
     const [issues, setIssues] = useState<GitHubIssue[]>([]);
     const [actions, setActions] = useState<GitHubAction[]>([]);
     const [insights, setInsights] = useState<GitHubInsights | null>(null);
@@ -91,7 +91,7 @@ export function useGitHubData(): UseGitHubDataReturn {
             const url = new URL(`${API_BASE}/github-data/projects/${projectId}/issues`);
             if (state) url.searchParams.set('state', state);
 
-            const response = await fetch(url.toString(), { headers: headers() });
+            const response = await fetch(url.toString(), {headers: headers()});
 
             if (!response.ok) throw new Error('Failed to fetch issues');
 
@@ -111,7 +111,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/actions`,
-                { headers: headers() }
+                {headers: headers()}
             );
 
             if (!response.ok) throw new Error('Failed to fetch actions');
@@ -132,7 +132,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/insights`,
-                { headers: headers() }
+                {headers: headers()}
             );
 
             if (!response.ok) {
@@ -159,7 +159,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/sync/issues`,
-                { method: 'POST', headers: headers() }
+                {method: 'POST', headers: headers()}
             );
 
             if (!response.ok) throw new Error('Failed to sync issues');
@@ -179,7 +179,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/sync/actions`,
-                { method: 'POST', headers: headers() }
+                {method: 'POST', headers: headers()}
             );
 
             if (!response.ok) throw new Error('Failed to sync actions');
@@ -199,7 +199,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/sync/insights`,
-                { method: 'POST', headers: headers() }
+                {method: 'POST', headers: headers()}
             );
 
             if (!response.ok) throw new Error('Failed to sync insights');
@@ -220,7 +220,7 @@ export function useGitHubData(): UseGitHubDataReturn {
         try {
             const response = await fetch(
                 `${API_BASE}/github-data/projects/${projectId}/sync/all`,
-                { method: 'POST', headers: headers() }
+                {method: 'POST', headers: headers()}
             );
 
             if (!response.ok) throw new Error('Failed to sync all data');

@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import type { AgentType, AgentInfo } from './types';
+import {motion} from 'framer-motion';
+import type {AgentInfo, AgentType} from './types';
 
 // ============== AGENT CONFIGURATION ==============
 export const AGENT_CONFIG: Record<AgentType, AgentInfo> = {
@@ -112,8 +112,8 @@ export function AgentBadge({
     if (animated) {
         return (
             <motion.span
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
+                initial={{scale: 0.9, opacity: 0}}
+                animate={{scale: 1, opacity: 1}}
                 className={`
           inline-flex items-center rounded-full font-medium
           ${config.bgColor} ${config.borderColor} border
@@ -148,7 +148,7 @@ interface AgentAvatarProps {
     className?: string;
 }
 
-export function AgentAvatar({ agent, size = 'md', showPulse = false, className = '' }: AgentAvatarProps) {
+export function AgentAvatar({agent, size = 'md', showPulse = false, className = ''}: AgentAvatarProps) {
     const config = AGENT_CONFIG[agent];
     if (!config) return null;
 
@@ -171,8 +171,9 @@ export function AgentAvatar({ agent, size = 'md', showPulse = false, className =
             </div>
             {showPulse && (
                 <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${config.bgColor} opacity-75`} />
-          <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${config.bgColor}`} />
+          <span
+              className={`animate-ping absolute inline-flex h-full w-full rounded-full ${config.bgColor} opacity-75`}/>
+          <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${config.bgColor}`}/>
         </span>
             )}
         </div>
@@ -188,21 +189,21 @@ interface AgentThinkingProps {
     progress?: number;
 }
 
-export function AgentThinking({ agent, thought, actionType, filePath, progress = 0 }: AgentThinkingProps) {
+export function AgentThinking({agent, thought, actionType, filePath, progress = 0}: AgentThinkingProps) {
     const config = AGENT_CONFIG[agent];
     if (!config) return null;
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{opacity: 0, y: 10}}
+            animate={{opacity: 1, y: 0}}
+            exit={{opacity: 0, y: -10}}
             className={`
         flex items-start gap-3 p-3 rounded-lg
         ${config.bgColor} ${config.borderColor} border
       `}
         >
-            <AgentAvatar agent={agent} size="sm" showPulse />
+            <AgentAvatar agent={agent} size="sm" showPulse/>
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                     <span className={`font-medium ${config.color}`}>{config.name}</span>
@@ -222,8 +223,8 @@ export function AgentThinking({ agent, thought, actionType, filePath, progress =
                 {progress > 0 && (
                     <div className="mt-2 h-1 bg-black/20 rounded-full overflow-hidden">
                         <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
+                            initial={{width: 0}}
+                            animate={{width: `${progress}%`}}
                             className={`h-full ${config.bgColor.replace('/20', '')}`}
                         />
                     </div>
@@ -240,24 +241,24 @@ interface AgentHandoffProps {
     message?: string;
 }
 
-export function AgentHandoff({ fromAgent, toAgent, message }: AgentHandoffProps) {
+export function AgentHandoff({fromAgent, toAgent, message}: AgentHandoffProps) {
     const fromConfig = AGENT_CONFIG[fromAgent];
     const toConfig = AGENT_CONFIG[toAgent];
     if (!fromConfig || !toConfig) return null;
 
     return (
         <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
+            initial={{opacity: 0, scale: 0.95}}
+            animate={{opacity: 1, scale: 1}}
             className="flex items-center gap-2 py-2 text-sm"
         >
-            <AgentBadge agent={fromAgent} size="sm" />
+            <AgentBadge agent={fromAgent} size="sm"/>
             <div className="flex items-center gap-1 text-[var(--color-text-muted)]">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6"/>
                 </svg>
             </div>
-            <AgentBadge agent={toAgent} size="sm" />
+            <AgentBadge agent={toAgent} size="sm"/>
             {message && (
                 <span className="text-[var(--color-text-muted)] text-xs ml-2 truncate">
           {message}

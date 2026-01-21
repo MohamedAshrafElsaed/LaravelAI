@@ -511,7 +511,15 @@ export interface SyncResponse {
 }
 
 // --- Git Changes Types ---
-export type GitChangeStatus = 'pending' | 'applied' | 'pushed' | 'pr_created' | 'pr_merged' | 'merged' | 'rolled_back' | 'discarded';
+export type GitChangeStatus =
+    'pending'
+    | 'applied'
+    | 'pushed'
+    | 'pr_created'
+    | 'pr_merged'
+    | 'merged'
+    | 'rolled_back'
+    | 'discarded';
 
 export interface GitChange {
     id: string;
@@ -761,7 +769,7 @@ export const chatApi = {
         api.get<ConversationMessage[]>(`/projects/${projectId}/conversations/${conversationId}`),
 
     deleteConversation: (projectId: string, conversationId: string) =>
-        api.delete<{message: string}>(`/projects/${projectId}/conversations/${conversationId}`),
+        api.delete<{ message: string }>(`/projects/${projectId}/conversations/${conversationId}`),
 
     getLogs: (projectId: string, conversationId: string, logType: LogType = 'main') =>
         api.get<string>(`/projects/${projectId}/conversations/${conversationId}/logs`, {
@@ -819,7 +827,7 @@ export const gitChangesApi = {
     pushChange: (projectId: string, changeId: string) =>
         api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/push`),
 
-    createPRForChange: (projectId: string, changeId: string, params?: {title?: string; description?: string}) =>
+    createPRForChange: (projectId: string, changeId: string, params?: { title?: string; description?: string }) =>
         api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/pr`, null, {params}),
 
     rollbackChange: (projectId: string, changeId: string, force?: boolean) =>

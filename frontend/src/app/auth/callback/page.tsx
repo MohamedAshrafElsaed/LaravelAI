@@ -4,6 +4,7 @@ import {Suspense, useEffect, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
 import {useAuthStore} from '@/lib/store';
 import api from '@/lib/api';
+import Link from "next/link";
 
 function CallbackContent() {
     const router = useRouter();
@@ -49,12 +50,12 @@ function CallbackContent() {
                 <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-6 text-center">
                     <h1 className="text-xl font-semibold text-red-500">Authentication Failed</h1>
                     <p className="mt-2 text-gray-400">{error}</p>
-                    <a
+                    <Link
                         href="/"
                         className="mt-4 inline-block text-sm text-blue-500 hover:underline"
                     >
                         Return to Home
-                    </a>
+                    </Link>
                 </div>
             </div>
         );

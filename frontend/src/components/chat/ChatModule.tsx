@@ -1,22 +1,26 @@
-// frontend/src/components/chat/ChatModule.tsx
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    Send, Loader2, AlertCircle, CheckCircle, X, Plus, Sparkles,
-    Bot, ChevronDown, ChevronRight, GitBranch, FileCode, Play,
-    GitPullRequest, ExternalLink, Copy, Check, RotateCcw
-} from 'lucide-react';
+import React, {forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState} from 'react';
+import {AnimatePresence} from 'framer-motion';
+import {AlertCircle, Bot, Check, ChevronDown, ChevronRight, Copy, Loader2, Plus, Send, Sparkles, X} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { chatApi, gitApi, gitChangesApi, getErrorMessage } from '@/lib/api';
-import type { Plan, PlanStep, ValidationResult, AgentType, ConversationEntry, AgentThinkingState, Message, InteractiveEvent, GitChange, GitChangeFile } from './types';
-import { AgentTimeline } from './AgentTimeline';
-import { PlanApprovalCard } from './PlanApprovalCard';
-import { ChangesReviewPanel } from './ChangesReviewPanel';
-import { AgentBadge, AGENT_CONFIG } from './AgentBadge';
+import {chatApi, getErrorMessage} from '@/lib/api';
+import type {
+    AgentThinkingState,
+    AgentType,
+    ConversationEntry,
+    GitChangeFile,
+    InteractiveEvent,
+    Message,
+    Plan,
+    ValidationResult
+} from './types';
+import {AgentTimeline} from './AgentTimeline';
+import {PlanApprovalCard} from './PlanApprovalCard';
+import {ChangesReviewPanel} from './ChangesReviewPanel';
+import {AGENT_CONFIG} from './AgentBadge';
 
 // ============== TYPES ==============
 export interface ChatModuleProps {
@@ -34,7 +38,7 @@ export interface ChatModuleRef {
 
 // ============== MAIN COMPONENT ==============
 export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function ChatModule(
-    { projectId, initialConversationId, onConversationChange, requirePlanApproval = true, className = '' },
+    {projectId, initialConversationId, onConversationChange, requirePlanApproval = true, className = ''},
     ref
 ) {
     // Core state
@@ -85,7 +89,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     }, []);
 
     const addEntry = useCallback((entry: Omit<ConversationEntry, 'id'>) => {
-        const newEntry = { ...entry, id: generateEntryId() };
+        const newEntry = {...entry, id: generateEntryId()};
         setConversationEntries(prev => [...prev, newEntry]);
     }, [generateEntryId]);
 
@@ -96,7 +100,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     }, []);
 
     const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
     }, []);
 
     const saveProcessingState = useCallback((isProcessing: boolean, convId: string | null) => {
@@ -197,7 +201,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
             } else if (line.startsWith('data:') && currentEvent) {
                 try {
                     const data = JSON.parse(line.substring(5).trim());
-                    events.push({ event: currentEvent as any, data });
+                    events.push({event: currentEvent as any, data});
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
@@ -208,7 +212,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     }, []);
 
     const processAgentEvent = useCallback((event: InteractiveEvent) => {
-        const { event: eventType, data } = event;
+        const {event: eventType, data} = event;
         const timestamp = data.timestamp || new Date().toISOString();
 
         switch (eventType) {
@@ -302,7 +306,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
                     const updated = [...prev];
                     for (let i = updated.length - 1; i >= 0; i--) {
                         if (updated[i].type === 'step' && !updated[i].completed) {
-                            updated[i] = { ...updated[i], completed: true };
+                            updated[i] = {...updated[i], completed: true};
                             break;
                         }
                     }
@@ -354,7 +358,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     }, [addEntry]);
 
     const handleEvent = useCallback((event: InteractiveEvent) => {
-        const { event: eventType, data } = event;
+        const {event: eventType, data} = event;
 
         // Process agent conversation events
         processAgentEvent(event);
@@ -546,13 +550,13 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
             console.log('[ChatModule] Starting to read stream...');
 
             while (true) {
-                const { done, value } = await reader.read();
+                const {done, value} = await reader.read();
                 if (done) {
                     console.log('[ChatModule] Stream complete');
                     break;
                 }
 
-                buffer += decoder.decode(value, { stream: true });
+                buffer += decoder.decode(value, {stream: true});
                 const events = parseSSEChunk(buffer);
                 buffer = '';
 
@@ -654,7 +658,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     if (!mounted) {
         return (
             <div className="flex h-full items-center justify-center bg-[var(--color-bg-primary)]">
-                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]"/>
                 <span className="ml-2 text-sm text-[var(--color-text-muted)]">Initializing...</span>
             </div>
         );
@@ -664,9 +668,10 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
         return (
             <div className="flex h-full items-center justify-center bg-[var(--color-bg-primary)]">
                 <div className="text-center">
-                    <AlertCircle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                    <AlertCircle className="h-12 w-12 text-amber-400 mx-auto mb-4"/>
                     <p className="text-[var(--color-text-muted)]">No project selected</p>
-                    <p className="text-sm text-[var(--color-text-dimmer)] mt-2">Please select a project to start chatting</p>
+                    <p className="text-sm text-[var(--color-text-dimmer)] mt-2">Please select a project to start
+                        chatting</p>
                 </div>
             </div>
         );
@@ -675,10 +680,12 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
     return (
         <div className={`flex flex-col h-full bg-[var(--color-bg-primary)] ${className}`}>
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <div
+                className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 text-sm">
-            <Sparkles className="h-4 w-4" />
+          <span
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 text-sm">
+            <Sparkles className="h-4 w-4"/>
             <span className="hidden sm:inline">Multi-Agent Mode</span>
           </span>
                     <button
@@ -686,14 +693,14 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
                         className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] transition-colors"
                         title={showAgentTimeline ? 'Hide agent activity' : 'Show agent activity'}
                     >
-                        {showAgentTimeline ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        {showAgentTimeline ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>}
                     </button>
                 </div>
                 <button
                     onClick={startNewChat}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4"/>
                     <span className="hidden sm:inline">New Chat</span>
                 </button>
             </div>
@@ -702,23 +709,24 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
             <div className="flex-1 overflow-y-auto">
                 {isLoadingMessages ? (
                     <div className="flex items-center justify-center h-full">
-                        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+                        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]"/>
                         <span className="ml-2 text-[var(--color-text-muted)]">Loading messages...</span>
                     </div>
                 ) : messages.length === 0 && !isStreaming && !isLoading ? (
-                    <WelcomeScreen onExampleClick={sendMessage} />
+                    <WelcomeScreen onExampleClick={sendMessage}/>
                 ) : (
                     <div className="p-4 space-y-4">
                         {messages.map((message) => (
-                            <MessageBubble key={message.id} message={message} showAgentTimeline={showAgentTimeline} />
+                            <MessageBubble key={message.id} message={message} showAgentTimeline={showAgentTimeline}/>
                         ))}
 
                         {/* Loading indicator when waiting for response */}
                         {isLoading && !streamingContent && conversationEntries.length === 0 && (
                             <div className="flex justify-start">
-                                <div className="max-w-[85%] rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-4">
+                                <div
+                                    className="max-w-[85%] rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-4">
                                     <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
-                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <Loader2 className="h-4 w-4 animate-spin"/>
                                         <span className="text-sm">Connecting to AI agents...</span>
                                     </div>
                                 </div>
@@ -728,8 +736,10 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
                         {/* Streaming content */}
                         {isStreaming && streamingContent && (
                             <div className="flex justify-start">
-                                <div className="max-w-[85%] rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-4">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]} className="prose prose-invert prose-sm max-w-none">
+                                <div
+                                    className="max-w-[85%] rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-4">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}
+                                                   className="prose prose-invert prose-sm max-w-none">
                                         {streamingContent}
                                     </ReactMarkdown>
                                 </div>
@@ -738,7 +748,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
 
                         {/* Agent Timeline */}
                         {showAgentTimeline && (conversationEntries.length > 0 || currentThinking) && (
-                            <AgentTimeline entries={conversationEntries} currentThinking={currentThinking} />
+                            <AgentTimeline entries={conversationEntries} currentThinking={currentThinking}/>
                         )}
 
                         {/* Plan Approval */}
@@ -768,16 +778,17 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
 
                         {/* Error */}
                         {error && (
-                            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                            <div
+                                className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0"/>
                                 <span>{error}</span>
                                 <button onClick={() => setError(null)} className="ml-auto hover:text-red-300">
-                                    <X className="h-4 w-4" />
+                                    <X className="h-4 w-4"/>
                                 </button>
                             </div>
                         )}
 
-                        <div ref={messagesEndRef} />
+                        <div ref={messagesEndRef}/>
                     </div>
                 )}
             </div>
@@ -799,14 +810,14 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
               disabled={isLoading || awaitingPlanApproval}
               rows={1}
               className="flex-1 resize-none rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] px-4 py-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ minHeight: '44px', maxHeight: '120px' }}
+              style={{minHeight: '44px', maxHeight: '120px'}}
           />
                     <button
                         onClick={() => sendMessage()}
                         disabled={!input.trim() || isLoading || awaitingPlanApproval}
                         className="flex items-center justify-center h-11 w-11 rounded-xl bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                        {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                        {isLoading ? <Loader2 className="h-5 w-5 animate-spin"/> : <Send className="h-5 w-5"/>}
                     </button>
                 </div>
             </div>
@@ -816,7 +827,7 @@ export const ChatModule = forwardRef<ChatModuleRef, ChatModuleProps>(function Ch
 
 // ============== SUB-COMPONENTS ==============
 
-function WelcomeScreen({ onExampleClick }: { onExampleClick: (msg: string) => void }) {
+function WelcomeScreen({onExampleClick}: { onExampleClick: (msg: string) => void }) {
     const examples = [
         "Create a new Product model with name, price, and category relationships",
         "Add authentication middleware to the API routes",
@@ -831,8 +842,9 @@ function WelcomeScreen({ onExampleClick }: { onExampleClick: (msg: string) => vo
 
     return (
         <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center mb-6">
-                <Bot className="h-8 w-8 text-white" />
+            <div
+                className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center mb-6">
+                <Bot className="h-8 w-8 text-white"/>
             </div>
             <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
                 Maestro AI Assistant
@@ -856,7 +868,7 @@ function WelcomeScreen({ onExampleClick }: { onExampleClick: (msg: string) => vo
     );
 }
 
-function MessageBubble({ message, showAgentTimeline }: { message: Message; showAgentTimeline: boolean }) {
+function MessageBubble({message, showAgentTimeline}: { message: Message; showAgentTimeline: boolean }) {
     const [copied, setCopied] = useState(false);
     const isUser = message.role === 'user';
 
@@ -877,7 +889,7 @@ function MessageBubble({ message, showAgentTimeline }: { message: Message; showA
                     <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
-                            code({ node, className, children, ...props }) {
+                            code({node, className, children, ...props}) {
                                 const match = /language-(\w+)/.exec(className || '');
                                 const inline = !match;
                                 return inline ? (
@@ -899,13 +911,14 @@ function MessageBubble({ message, showAgentTimeline }: { message: Message; showA
                 </div>
 
                 {!isUser && (
-                    <div className="flex items-center justify-end gap-2 mt-3 pt-2 border-t border-[var(--color-border-subtle)]">
+                    <div
+                        className="flex items-center justify-end gap-2 mt-3 pt-2 border-t border-[var(--color-border-subtle)]">
                         <button
                             onClick={handleCopy}
                             className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] transition-colors"
                             title="Copy message"
                         >
-                            {copied ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                            {copied ? <Check className="h-4 w-4 text-green-400"/> : <Copy className="h-4 w-4"/>}
                         </button>
                     </div>
                 )}
@@ -913,11 +926,13 @@ function MessageBubble({ message, showAgentTimeline }: { message: Message; showA
                 {/* Show stored agent activity for assistant messages */}
                 {!isUser && showAgentTimeline && message.processingData?.agent_activity?.length > 0 && (
                     <details className="mt-3 pt-3 border-t border-[var(--color-border-subtle)]">
-                        <summary className="cursor-pointer text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
+                        <summary
+                            className="cursor-pointer text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
                             View agent activity ({message.processingData.agent_activity.length} events)
                         </summary>
                         <div className="mt-2">
-                            <AgentTimeline entries={message.processingData.agent_activity} currentThinking={null} compact />
+                            <AgentTimeline entries={message.processingData.agent_activity} currentThinking={null}
+                                           compact/>
                         </div>
                     </details>
                 )}

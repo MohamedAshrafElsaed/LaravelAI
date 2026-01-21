@@ -1,14 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-    projectsApi,
-    gitChangesApi,
-    chatApi,
-    GitChange,
-    Conversation,
-} from '@/lib/api';
-import api from '@/lib/api';
+import {useCallback, useEffect, useState} from 'react';
+import api, {chatApi, Conversation, GitChange, gitChangesApi, projectsApi,} from '@/lib/api';
 
 // ============== TYPES ==============
 
@@ -71,7 +64,7 @@ export function useProjects() {
         fetchProjects();
     }, [fetchProjects]);
 
-    return { projects, loading, error, refetch: fetchProjects };
+    return {projects, loading, error, refetch: fetchProjects};
 }
 
 /**
@@ -93,9 +86,9 @@ export function useUsageStats() {
             setError(err.message || 'Failed to fetch usage stats');
             // Set default stats on error
             setStats({
-                today: { requests: 0, tokens: 0, cost: 0 },
-                this_week: { requests: 0, tokens: 0, cost: 0 },
-                this_month: { requests: 0, tokens: 0, cost: 0 },
+                today: {requests: 0, tokens: 0, cost: 0},
+                this_week: {requests: 0, tokens: 0, cost: 0},
+                this_month: {requests: 0, tokens: 0, cost: 0},
             });
         } finally {
             setLoading(false);
@@ -106,7 +99,7 @@ export function useUsageStats() {
         fetchStats();
     }, [fetchStats]);
 
-    return { stats, loading, error, refetch: fetchStats };
+    return {stats, loading, error, refetch: fetchStats};
 }
 
 /**
@@ -125,7 +118,7 @@ export function useGitChanges(projectId: string | null) {
 
         try {
             setLoading(true);
-            const response = await gitChangesApi.listProjectChanges(projectId, { limit: 10 });
+            const response = await gitChangesApi.listProjectChanges(projectId, {limit: 10});
             setChanges(response.data);
             setError(null);
         } catch (err: any) {
@@ -141,7 +134,7 @@ export function useGitChanges(projectId: string | null) {
         fetchChanges();
     }, [fetchChanges]);
 
-    return { changes, loading, error, refetch: fetchChanges };
+    return {changes, loading, error, refetch: fetchChanges};
 }
 
 /**
@@ -176,7 +169,7 @@ export function useConversations(projectId: string | null) {
         fetchConversations();
     }, [fetchConversations]);
 
-    return { conversations, loading, error, refetch: fetchConversations };
+    return {conversations, loading, error, refetch: fetchConversations};
 }
 
 /**
@@ -197,7 +190,7 @@ export function useActivityFeed(projectId: string | null) {
             setLoading(true);
 
             // Fetch git changes
-            const changesResponse = await gitChangesApi.listProjectChanges(projectId, { limit: 20 });
+            const changesResponse = await gitChangesApi.listProjectChanges(projectId, {limit: 20});
 
             // Transform git changes to activity items
             const changeActivities: Activity[] = changesResponse.data.map((change: GitChange) => {
@@ -239,7 +232,7 @@ export function useActivityFeed(projectId: string | null) {
         fetchActivities();
     }, [fetchActivities]);
 
-    return { activities, loading, error, refetch: fetchActivities };
+    return {activities, loading, error, refetch: fetchActivities};
 }
 
 /**
@@ -275,15 +268,15 @@ export function useProjectHealth(projectId: string | null) {
         fetchHealth();
     }, [fetchHealth]);
 
-    return { health, loading, error, refetch: fetchHealth };
+    return {health, loading, error, refetch: fetchHealth};
 }
 
 /**
  * Main hook to manage all dashboard data
  */
 export function useDashboard() {
-    const { projects, loading: projectsLoading, refetch: refetchProjects } = useProjects();
-    const { stats, loading: statsLoading, refetch: refetchStats } = useUsageStats();
+    const {projects, loading: projectsLoading, refetch: refetchProjects} = useProjects();
+    const {stats, loading: statsLoading, refetch: refetchStats} = useUsageStats();
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
     // Auto-select first project when projects load
@@ -295,9 +288,9 @@ export function useDashboard() {
 
     const selectedProject = projects.find(p => p.id === selectedProjectId) || null;
 
-    const { changes, loading: changesLoading, refetch: refetchChanges } = useGitChanges(selectedProjectId);
-    const { activities, loading: activitiesLoading, refetch: refetchActivities } = useActivityFeed(selectedProjectId);
-    const { health } = useProjectHealth(selectedProjectId);
+    const {changes, loading: changesLoading, refetch: refetchChanges} = useGitChanges(selectedProjectId);
+    const {activities, loading: activitiesLoading, refetch: refetchActivities} = useActivityFeed(selectedProjectId);
+    const {health} = useProjectHealth(selectedProjectId);
 
     const refetchAll = useCallback(() => {
         refetchProjects();

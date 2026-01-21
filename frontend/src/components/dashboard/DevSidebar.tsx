@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import {useEffect, useState} from 'react';
+import {usePathname, useRouter} from 'next/navigation';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'framer-motion';
+import {AnimatePresence, motion} from 'framer-motion';
 import {
     FileCode,
     FolderKanban,
     GitBranch,
     LayoutDashboard,
+    MessageSquare,
     Moon,
     PanelLeft,
     PanelLeftClose,
@@ -17,9 +18,8 @@ import {
     Sun,
     Terminal,
     X,
-    MessageSquare,
 } from 'lucide-react';
-import { useThemeStore } from '@/lib/store';
+import {useThemeStore} from '@/lib/store';
 
 interface NavItem {
     id: string;
@@ -44,17 +44,17 @@ export default function DevSidebar({
                                    }: DevSidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
-    const { theme, toggleTheme } = useThemeStore();
+    const {theme, toggleTheme} = useThemeStore();
     const [collapsed, setCollapsed] = useState(false);
 
     // Navigation items with routes
     const navItems: NavItem[] = [
-        { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, shortcut: '⌘1', href: '/dashboard' },
-        { id: 'projects', label: 'Projects', icon: FolderKanban, shortcut: '⌘2', href: '/dashboard/projects' },
-        { id: 'chat', label: 'AI Chat', icon: MessageSquare, shortcut: '⌘3', href: '/dashboard/chat' },
-        { id: 'files', label: 'Explorer', icon: FileCode, shortcut: '⌘4', href: '/dashboard/files' },
-        { id: 'git', label: 'Source Control', icon: GitBranch, shortcut: '⌘5', href: '/dashboard/git' },
-        { id: 'terminal', label: 'Terminal', icon: Terminal, shortcut: '⌘6', href: '/dashboard/terminal' },
+        {id: 'dashboard', label: 'Overview', icon: LayoutDashboard, shortcut: '⌘1', href: '/dashboard'},
+        {id: 'projects', label: 'Projects', icon: FolderKanban, shortcut: '⌘2', href: '/dashboard/projects'},
+        {id: 'chat', label: 'AI Chat', icon: MessageSquare, shortcut: '⌘3', href: '/dashboard/chat'},
+        {id: 'files', label: 'Explorer', icon: FileCode, shortcut: '⌘4', href: '/dashboard/files'},
+        {id: 'git', label: 'Source Control', icon: GitBranch, shortcut: '⌘5', href: '/dashboard/git'},
+        {id: 'terminal', label: 'Terminal', icon: Terminal, shortcut: '⌘6', href: '/dashboard/terminal'},
     ];
 
     // Determine active tab from pathname or props
@@ -120,8 +120,8 @@ export default function DevSidebar({
 
             <motion.aside
                 initial={false}
-                animate={{ width: collapsed ? 64 : 256 }}
-                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                animate={{width: collapsed ? 64 : 256}}
+                transition={{duration: 0.2, ease: 'easeInOut'}}
                 className={`
                     fixed inset-y-0 left-0 z-50
                     bg-[var(--color-bg-primary)] 
@@ -133,17 +133,19 @@ export default function DevSidebar({
                 `}
             >
                 {/* Logo */}
-                <div className="h-14 flex items-center justify-between px-4 border-b border-[var(--color-border-subtle)]">
+                <div
+                    className="h-14 flex items-center justify-between px-4 border-b border-[var(--color-border-subtle)]">
                     <AnimatePresence mode="wait">
                         {!collapsed ? (
                             <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
+                                initial={{opacity: 0}}
+                                animate={{opacity: 1}}
+                                exit={{opacity: 0}}
                                 className="flex items-center gap-2"
                             >
                                 <Link href="/dashboard" className="flex items-center gap-2">
-                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary)]/70 flex items-center justify-center">
+                                    <div
+                                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary)]/70 flex items-center justify-center">
                                         <span className="text-white font-bold text-sm">M</span>
                                     </div>
                                     <div>
@@ -159,9 +161,9 @@ export default function DevSidebar({
                         ) : (
                             <Link href="/dashboard">
                                 <motion.div
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
+                                    initial={{opacity: 0}}
+                                    animate={{opacity: 1}}
+                                    exit={{opacity: 0}}
                                     className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary)]/70 flex items-center justify-center mx-auto"
                                 >
                                     <span className="text-white font-bold text-sm">M</span>
@@ -175,7 +177,7 @@ export default function DevSidebar({
                         onClick={onCloseMobile}
                         className="lg:hidden p-1.5 rounded-md hover:bg-[var(--color-bg-surface)] text-[var(--color-text-muted)]"
                     >
-                        <X size={18} />
+                        <X size={18}/>
                     </button>
                 </div>
 
@@ -183,15 +185,17 @@ export default function DevSidebar({
                 <AnimatePresence>
                     {!collapsed && (
                         <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
+                            initial={{opacity: 0, height: 0}}
+                            animate={{opacity: 1, height: 'auto'}}
+                            exit={{opacity: 0, height: 0}}
                             className="px-3 py-3 border-b border-[var(--color-border-subtle)]"
                         >
-                            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-dimmer)] bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg hover:border-[var(--color-border-default)] hover:text-[var(--color-text-muted)] transition-colors">
-                                <Search size={14} />
+                            <button
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-dimmer)] bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg hover:border-[var(--color-border-default)] hover:text-[var(--color-text-muted)] transition-colors">
+                                <Search size={14}/>
                                 <span className="truncate">Search...</span>
-                                <span className="ml-auto font-mono text-xs text-[var(--color-text-dimmer)] border border-[var(--color-border-subtle)] rounded px-1 flex-shrink-0">
+                                <span
+                                    className="ml-auto font-mono text-xs text-[var(--color-text-dimmer)] border border-[var(--color-border-subtle)] rounded px-1 flex-shrink-0">
                                     ⌘K
                                 </span>
                             </button>
@@ -221,9 +225,9 @@ export default function DevSidebar({
                         return (
                             <motion.div
                                 key={item.id}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: index * 0.05 }}
+                                initial={{opacity: 0, x: -10}}
+                                animate={{opacity: 1, x: 0}}
+                                transition={{delay: index * 0.05}}
                             >
                                 <Link
                                     href={item.href}
@@ -241,8 +245,8 @@ export default function DevSidebar({
                                         <motion.div
                                             layoutId="activeTab"
                                             className="absolute left-0 w-0.5 h-full bg-[var(--color-primary)]"
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
+                                            initial={{opacity: 0}}
+                                            animate={{opacity: 1}}
                                         />
                                     )}
                                     <item.icon
@@ -257,17 +261,17 @@ export default function DevSidebar({
                                         {!collapsed && (
                                             <>
                                                 <motion.span
-                                                    initial={{ opacity: 0 }}
-                                                    animate={{ opacity: 1 }}
-                                                    exit={{ opacity: 0 }}
+                                                    initial={{opacity: 0}}
+                                                    animate={{opacity: 1}}
+                                                    exit={{opacity: 0}}
                                                     className="truncate"
                                                 >
                                                     {item.label}
                                                 </motion.span>
                                                 <motion.span
-                                                    initial={{ opacity: 0 }}
-                                                    animate={{ opacity: 1 }}
-                                                    exit={{ opacity: 0 }}
+                                                    initial={{opacity: 0}}
+                                                    animate={{opacity: 1}}
+                                                    exit={{opacity: 0}}
                                                     className={`ml-auto font-mono text-[10px] flex-shrink-0 ${
                                                         isActive
                                                             ? 'text-[var(--color-primary)]/70'
@@ -296,10 +300,10 @@ export default function DevSidebar({
                         title={collapsed ? 'Expand sidebar (⌘B)' : 'Collapse sidebar (⌘B)'}
                     >
                         {collapsed ? (
-                            <PanelLeft size={20} className="text-[var(--color-text-dimmer)]" />
+                            <PanelLeft size={20} className="text-[var(--color-text-dimmer)]"/>
                         ) : (
                             <>
-                                <PanelLeftClose size={16} className="mr-3 text-[var(--color-text-dimmer)]" />
+                                <PanelLeftClose size={16} className="mr-3 text-[var(--color-text-dimmer)]"/>
                                 <span>Collapse</span>
                             </>
                         )}
@@ -353,7 +357,7 @@ export default function DevSidebar({
                             collapsed ? 'justify-center' : ''
                         }`}
                     >
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"/>
                         {!collapsed && <span>System Online</span>}
                     </div>
                 </div>

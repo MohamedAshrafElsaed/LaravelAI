@@ -3,15 +3,12 @@
 
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    MessageSquare, Maximize2, Minimize2, X, History,
-    ChevronLeft, ChevronRight, Loader2, Sparkles
-} from 'lucide-react';
-import { ChatModule, type ChatModuleRef } from '@/components/chat';
-import { chatApi } from '@/lib/api';
-import type { Conversation } from '@/components/chat/types';
+import React, {useCallback, useRef, useState} from 'react';
+import {AnimatePresence, motion} from 'framer-motion';
+import {History, Loader2, Maximize2, MessageSquare, Minimize2, Sparkles, X} from 'lucide-react';
+import {ChatModule, type ChatModuleRef} from '@/components/chat';
+import {chatApi} from '@/lib/api';
+import type {Conversation} from '@/components/chat/types';
 
 interface DashboardChatViewProps {
     projectId: string | null;
@@ -19,7 +16,7 @@ interface DashboardChatViewProps {
     className?: string;
 }
 
-export function DashboardChatView({ projectId, projectName, className = '' }: DashboardChatViewProps) {
+export function DashboardChatView({projectId, projectName, className = ''}: DashboardChatViewProps) {
     const chatRef = useRef<ChatModuleRef>(null);
 
     // State
@@ -80,14 +77,15 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
         if (diffDays === 0) return 'Today';
         if (diffDays === 1) return 'Yesterday';
         if (diffDays < 7) return `${diffDays}d ago`;
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
     };
 
     if (!projectId) {
         return (
             <div className={`flex flex-col items-center justify-center h-full p-8 text-center ${className}`}>
-                <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-elevated)] flex items-center justify-center mb-4">
-                    <MessageSquare className="h-6 w-6 text-[var(--color-text-muted)]" />
+                <div
+                    className="w-12 h-12 rounded-xl bg-[var(--color-bg-elevated)] flex items-center justify-center mb-4">
+                    <MessageSquare className="h-6 w-6 text-[var(--color-text-muted)]"/>
                 </div>
                 <p className="text-[var(--color-text-muted)]">Select a project to start chatting</p>
             </div>
@@ -97,10 +95,12 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
     return (
         <div className={`flex flex-col h-full bg-[var(--color-bg-primary)] ${className}`}>
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <div
+                className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 text-xs">
-            <Sparkles className="h-3.5 w-3.5" />
+          <span
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 text-xs">
+            <Sparkles className="h-3.5 w-3.5"/>
             AI Chat
           </span>
                     {projectName && (
@@ -120,14 +120,14 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
                         }`}
                         title="Conversation history"
                     >
-                        <History className="h-4 w-4" />
+                        <History className="h-4 w-4"/>
                     </button>
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] transition-colors"
                         title={isExpanded ? 'Minimize' : 'Maximize'}
                     >
-                        {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                        {isExpanded ? <Minimize2 className="h-4 w-4"/> : <Maximize2 className="h-4 w-4"/>}
                     </button>
                 </div>
             </div>
@@ -138,10 +138,10 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
                 <AnimatePresence>
                     {showHistory && (
                         <motion.div
-                            initial={{ width: 0, opacity: 0 }}
-                            animate={{ width: 200, opacity: 1 }}
-                            exit={{ width: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
+                            initial={{width: 0, opacity: 0}}
+                            animate={{width: 200, opacity: 1}}
+                            exit={{width: 0, opacity: 0}}
+                            transition={{duration: 0.2}}
                             className="flex-shrink-0 border-r border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] overflow-hidden"
                         >
                             <div className="h-full flex flex-col">
@@ -150,7 +150,7 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
                                         onClick={handleNewChat}
                                         className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-primary)] text-white text-xs font-medium hover:bg-[var(--color-primary-hover)] transition-colors"
                                     >
-                                        <MessageSquare className="h-3.5 w-3.5" />
+                                        <MessageSquare className="h-3.5 w-3.5"/>
                                         New Chat
                                     </button>
                                 </div>
@@ -158,7 +158,7 @@ export function DashboardChatView({ projectId, projectName, className = '' }: Da
                                 <div className="flex-1 overflow-y-auto p-2 space-y-1">
                                     {conversationsLoading ? (
                                         <div className="flex items-center justify-center py-4">
-                                            <Loader2 className="h-4 w-4 animate-spin text-[var(--color-text-muted)]" />
+                                            <Loader2 className="h-4 w-4 animate-spin text-[var(--color-text-muted)]"/>
                                         </div>
                                     ) : conversations.length === 0 ? (
                                         <p className="text-xs text-[var(--color-text-muted)] text-center py-4">
@@ -211,7 +211,7 @@ interface FloatingChatWidgetProps {
     projectName?: string;
 }
 
-export function FloatingChatWidget({ projectId, projectName }: FloatingChatWidgetProps) {
+export function FloatingChatWidget({projectId, projectName}: FloatingChatWidgetProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
 
@@ -222,13 +222,13 @@ export function FloatingChatWidget({ projectId, projectName }: FloatingChatWidge
             {/* Floating button */}
             {!isOpen && (
                 <motion.button
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    exit={{ scale: 0 }}
+                    initial={{scale: 0}}
+                    animate={{scale: 1}}
+                    exit={{scale: 0}}
                     onClick={() => setIsOpen(true)}
                     className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 text-white shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-shadow flex items-center justify-center"
                 >
-                    <MessageSquare className="h-6 w-6" />
+                    <MessageSquare className="h-6 w-6"/>
                 </motion.button>
             )}
 
@@ -236,7 +236,7 @@ export function FloatingChatWidget({ projectId, projectName }: FloatingChatWidge
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
-                        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                        initial={{opacity: 0, y: 20, scale: 0.95}}
                         animate={{
                             opacity: 1,
                             y: 0,
@@ -244,18 +244,21 @@ export function FloatingChatWidget({ projectId, projectName }: FloatingChatWidge
                             height: isMinimized ? 56 : 500,
                             width: isMinimized ? 280 : 380,
                         }}
-                        exit={{ opacity: 0, y: 20, scale: 0.95 }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                        exit={{opacity: 0, y: 20, scale: 0.95}}
+                        transition={{type: 'spring', damping: 25, stiffness: 300}}
                         className="fixed bottom-6 right-6 z-50 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] shadow-2xl overflow-hidden"
                     >
                         {/* Widget header */}
-                        <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-b border-[var(--color-border-subtle)]">
+                        <div
+                            className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-b border-[var(--color-border-subtle)]">
                             <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-                                    <Sparkles className="h-4 w-4 text-white" />
+                                <div
+                                    className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+                                    <Sparkles className="h-4 w-4 text-white"/>
                                 </div>
                                 <div>
-                                    <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Maestro AI</h3>
+                                    <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Maestro
+                                        AI</h3>
                                     {projectName && (
                                         <p className="text-xs text-[var(--color-text-muted)] truncate max-w-[150px]">
                                             {projectName}
@@ -268,13 +271,13 @@ export function FloatingChatWidget({ projectId, projectName }: FloatingChatWidge
                                     onClick={() => setIsMinimized(!isMinimized)}
                                     className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] transition-colors"
                                 >
-                                    {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+                                    {isMinimized ? <Maximize2 className="h-4 w-4"/> : <Minimize2 className="h-4 w-4"/>}
                                 </button>
                                 <button
                                     onClick={() => setIsOpen(false)}
                                     className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] transition-colors"
                                 >
-                                    <X className="h-4 w-4" />
+                                    <X className="h-4 w-4"/>
                                 </button>
                             </div>
                         </div>

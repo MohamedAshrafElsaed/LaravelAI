@@ -1,15 +1,15 @@
 // frontend/src/app/dashboard/settings/page.tsx
 'use client';
 
-import { motion } from 'framer-motion';
-import { Moon, Sun, User, Bell, Shield, Database, LogOut } from 'lucide-react';
-import { useAuthStore, useThemeStore } from '@/lib/store';
-import { useRouter } from 'next/navigation';
+import {motion} from 'framer-motion';
+import {Bell, Database, LogOut, Moon, Shield, Sun, User} from 'lucide-react';
+import {useAuthStore, useThemeStore} from '@/lib/store';
+import {useRouter} from 'next/navigation';
 
 export default function SettingsRoutePage() {
     const router = useRouter();
-    const { user, logout } = useAuthStore();
-    const { theme, toggleTheme } = useThemeStore();
+    const {user, logout} = useAuthStore();
+    const {theme, toggleTheme} = useThemeStore();
 
     const handleLogout = () => {
         logout();
@@ -18,9 +18,9 @@ export default function SettingsRoutePage() {
 
     return (
         <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
             className="flex-1 p-6 overflow-y-auto"
         >
             <div className="max-w-2xl mx-auto">
@@ -37,10 +37,11 @@ export default function SettingsRoutePage() {
                 {/* Settings Sections */}
                 <div className="space-y-6">
                     {/* Profile Section */}
-                    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+                    <div
+                        className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
                             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                                <User className="w-4 h-4" />
+                                <User className="w-4 h-4"/>
                                 Profile
                             </h2>
                         </div>
@@ -53,8 +54,9 @@ export default function SettingsRoutePage() {
                                         className="w-16 h-16 rounded-full border-2 border-[var(--color-border-subtle)]"
                                     />
                                 ) : (
-                                    <div className="w-16 h-16 rounded-full bg-[var(--color-primary-subtle)] flex items-center justify-center">
-                                        <User className="w-8 h-8 text-[var(--color-primary)]" />
+                                    <div
+                                        className="w-16 h-16 rounded-full bg-[var(--color-primary-subtle)] flex items-center justify-center">
+                                        <User className="w-8 h-8 text-[var(--color-primary)]"/>
                                     </div>
                                 )}
                                 <div>
@@ -75,10 +77,11 @@ export default function SettingsRoutePage() {
                     </div>
 
                     {/* Appearance Section */}
-                    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+                    <div
+                        className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
                             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                                {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                                {theme === 'dark' ? <Moon className="w-4 h-4"/> : <Sun className="w-4 h-4"/>}
                                 Appearance
                             </h2>
                         </div>
@@ -96,12 +99,12 @@ export default function SettingsRoutePage() {
                                 >
                                     {theme === 'dark' ? (
                                         <>
-                                            <Sun className="w-4 h-4" />
+                                            <Sun className="w-4 h-4"/>
                                             <span>Light</span>
                                         </>
                                     ) : (
                                         <>
-                                            <Moon className="w-4 h-4" />
+                                            <Moon className="w-4 h-4"/>
                                             <span>Dark</span>
                                         </>
                                     )}
@@ -111,10 +114,11 @@ export default function SettingsRoutePage() {
                     </div>
 
                     {/* Notifications Section */}
-                    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+                    <div
+                        className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
                             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                                <Bell className="w-4 h-4" />
+                                <Bell className="w-4 h-4"/>
                                 Notifications
                             </h2>
                         </div>
@@ -126,10 +130,11 @@ export default function SettingsRoutePage() {
                     </div>
 
                     {/* Security Section */}
-                    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+                    <div
+                        className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
                             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                                <Shield className="w-4 h-4" />
+                                <Shield className="w-4 h-4"/>
                                 Security
                             </h2>
                         </div>
@@ -141,10 +146,11 @@ export default function SettingsRoutePage() {
                     </div>
 
                     {/* Data & Storage Section */}
-                    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+                    <div
+                        className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
                             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                                <Database className="w-4 h-4" />
+                                <Database className="w-4 h-4"/>
                                 Data & Storage
                             </h2>
                         </div>
@@ -169,7 +175,7 @@ export default function SettingsRoutePage() {
                                     onClick={handleLogout}
                                     className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
                                 >
-                                    <LogOut className="w-4 h-4" />
+                                    <LogOut className="w-4 h-4"/>
                                     <span>Sign Out</span>
                                 </button>
                             </div>

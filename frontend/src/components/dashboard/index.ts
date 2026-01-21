@@ -7,5 +7,5 @@ export {default as DiffPreview} from './DiffPreview';
 export {default as DevFileExplorer} from './DevFileExplorer';
 export {default as EmptyState} from './EmptyState';
 export {default as StatCard} from './StatCard';
-export { default as ProjectsPage } from './ProjectsPage';
+export {default as ProjectsPage} from './ProjectsPage';
 

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Copy, Check, FileCode, X, Download } from 'lucide-react';
+import {useEffect, useRef, useState} from 'react';
+import {Check, Copy, Download, FileCode, X} from 'lucide-react';
 import Prism from 'prismjs';
 
 // Import Prism theme (dark theme)
@@ -181,7 +181,7 @@ export default function CodeViewer({
 
     // Download file
     const handleDownload = () => {
-        const blob = new Blob([content], { type: 'text/plain' });
+        const blob = new Blob([content], {type: 'text/plain'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -200,9 +200,10 @@ export default function CodeViewer({
     return (
         <div className="h-full flex flex-col bg-[var(--color-bg-primary)] code-viewer">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-surface)] border-b border-[var(--color-border)]">
+            <div
+                className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-surface)] border-b border-[var(--color-border)]">
                 <div className="flex items-center gap-2 min-w-0">
-                    <FileCode className="h-4 w-4 text-[var(--color-text-secondary)] flex-shrink-0" />
+                    <FileCode className="h-4 w-4 text-[var(--color-text-secondary)] flex-shrink-0"/>
                     <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
             {fileName}
           </span>
@@ -212,7 +213,8 @@ export default function CodeViewer({
                 </div>
                 <div className="flex items-center gap-1">
                     {/* Language badge */}
-                    <span className="px-2 py-0.5 text-xs bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] rounded">
+                    <span
+                        className="px-2 py-0.5 text-xs bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] rounded">
             {detectedLanguage}
           </span>
 
@@ -222,7 +224,7 @@ export default function CodeViewer({
                         className="p-1.5 hover:bg-[var(--color-bg-elevated)] rounded transition-colors"
                         title="Download file"
                     >
-                        <Download className="h-4 w-4 text-[var(--color-text-secondary)]" />
+                        <Download className="h-4 w-4 text-[var(--color-text-secondary)]"/>
                     </button>
 
                     {/* Copy button */}
@@ -232,9 +234,9 @@ export default function CodeViewer({
                         title="Copy code"
                     >
                         {copied ? (
-                            <Check className="h-4 w-4 text-green-400" />
+                            <Check className="h-4 w-4 text-green-400"/>
                         ) : (
-                            <Copy className="h-4 w-4 text-[var(--color-text-secondary)]" />
+                            <Copy className="h-4 w-4 text-[var(--color-text-secondary)]"/>
                         )}
                     </button>
 
@@ -245,7 +247,7 @@ export default function CodeViewer({
                             className="p-1.5 hover:bg-[var(--color-bg-elevated)] rounded transition-colors"
                             title="Close"
                         >
-                            <X className="h-4 w-4 text-[var(--color-text-secondary)]" />
+                            <X className="h-4 w-4 text-[var(--color-text-secondary)]"/>
                         </button>
                     )}
                 </div>
@@ -254,12 +256,13 @@ export default function CodeViewer({
             {/* Code content */}
             <div
                 className="flex-1 overflow-auto"
-                style={{ maxHeight: maxHeight }}
+                style={{maxHeight: maxHeight}}
             >
                 <div className="flex min-h-full">
                     {/* Line numbers (custom implementation for better control) */}
                     {showLineNumbers && (
-                        <div className="flex-shrink-0 py-4 pr-2 pl-4 bg-[var(--color-bg-surface)] border-r border-[var(--color-border)] select-none sticky left-0">
+                        <div
+                            className="flex-shrink-0 py-4 pr-2 pl-4 bg-[var(--color-bg-surface)] border-r border-[var(--color-border)] select-none sticky left-0">
                             {lines.map((_, i) => {
                                 const lineNum = i + 1;
                                 const isHighlighted = highlightLines.includes(lineNum);
@@ -284,12 +287,12 @@ export default function CodeViewer({
                         ref={preRef}
                         className={`flex-1 p-4 overflow-x-auto m-0 bg-transparent ${showLineNumbers ? '' : 'pl-4'}`}
                         data-line={lineHighlightAttr}
-                        style={{ background: 'transparent' }}
+                        style={{background: 'transparent'}}
                     >
             <code
                 ref={codeRef}
                 className={`${languageClass} text-sm leading-6 font-mono`}
-                style={{ background: 'transparent' }}
+                style={{background: 'transparent'}}
             >
               {content}
             </code>
@@ -298,7 +301,8 @@ export default function CodeViewer({
             </div>
 
             {/* Footer with stats */}
-            <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-surface)] border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
+            <div
+                className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-surface)] border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
                 <div className="flex items-center gap-4">
                     <span>{lines.length} lines</span>
                     <span>{fileSize} KB</span>
@@ -314,4 +318,4 @@ export default function CodeViewer({
 }
 
 // Export helper function
-export { getLanguageFromPath };
+export {getLanguageFromPath};

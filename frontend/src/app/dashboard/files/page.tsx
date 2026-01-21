@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { useRouter } from 'next/navigation';
-import { FileCode, Copy, Check, X } from 'lucide-react';
-import { useDashboard } from '@/hooks/useDashboardData';
+import {useEffect, useState} from 'react';
+import {motion} from 'framer-motion';
+import {useRouter} from 'next/navigation';
+import {Check, Copy, FileCode, X} from 'lucide-react';
+import {useDashboard} from '@/hooks/useDashboardData';
 import DevFileExplorer from '@/components/dashboard/DevFileExplorer';
 import EmptyState from '@/components/dashboard/EmptyState';
 import ProjectSelector from '@/components/dashboard/ProjectSelector';
@@ -67,13 +67,14 @@ export default function FilesRoutePage() {
 
     return (
         <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            exit={{opacity: 0}}
             className="flex-1 flex flex-col h-full overflow-hidden"
         >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <div
+                className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <div>
                     <h1 className="text-xl font-bold text-[var(--color-text-primary)]">
                         File Explorer
@@ -119,9 +120,10 @@ export default function FilesRoutePage() {
                     {selectedFile ? (
                         <>
                             {/* File Header */}
-                            <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-primary)] border-b border-[var(--color-border-subtle)]">
+                            <div
+                                className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-primary)] border-b border-[var(--color-border-subtle)]">
                                 <div className="flex items-center gap-2 min-w-0">
-                                    <FileCode className="h-4 w-4 text-[var(--color-text-muted)]" />
+                                    <FileCode className="h-4 w-4 text-[var(--color-text-muted)]"/>
                                     <span className="text-sm font-medium text-[var(--color-text-primary)]">
                                         {fileName}
                                     </span>
@@ -130,7 +132,8 @@ export default function FilesRoutePage() {
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    <span className="px-2 py-0.5 text-xs bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] rounded">
+                                    <span
+                                        className="px-2 py-0.5 text-xs bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] rounded">
                                         {getLanguageFromPath(selectedFile)}
                                     </span>
                                     <button
@@ -139,9 +142,9 @@ export default function FilesRoutePage() {
                                         title="Copy"
                                     >
                                         {copied ? (
-                                            <Check className="h-4 w-4 text-green-400" />
+                                            <Check className="h-4 w-4 text-green-400"/>
                                         ) : (
-                                            <Copy className="h-4 w-4 text-[var(--color-text-muted)]" />
+                                            <Copy className="h-4 w-4 text-[var(--color-text-muted)]"/>
                                         )}
                                     </button>
                                     <button
@@ -149,7 +152,7 @@ export default function FilesRoutePage() {
                                         className="p-1.5 hover:bg-[var(--color-bg-hover)] rounded transition-colors"
                                         title="Close"
                                     >
-                                        <X className="h-4 w-4 text-[var(--color-text-muted)]" />
+                                        <X className="h-4 w-4 text-[var(--color-text-muted)]"/>
                                     </button>
                                 </div>
                             </div>
@@ -158,7 +161,8 @@ export default function FilesRoutePage() {
                             <div className="flex-1 overflow-auto">
                                 <div className="flex min-h-full">
                                     {/* Line Numbers */}
-                                    <div className="flex-shrink-0 py-4 pr-2 pl-4 bg-[var(--color-bg-primary)] border-r border-[var(--color-border-subtle)] select-none sticky left-0">
+                                    <div
+                                        className="flex-shrink-0 py-4 pr-2 pl-4 bg-[var(--color-bg-primary)] border-r border-[var(--color-border-subtle)] select-none sticky left-0">
                                         {lines.map((_, i) => (
                                             <div
                                                 key={i}
@@ -169,20 +173,22 @@ export default function FilesRoutePage() {
                                         ))}
                                     </div>
                                     {/* Code */}
-                                    <pre className="flex-1 p-4 overflow-x-auto font-mono text-sm leading-6 text-[var(--color-text-primary)]">
+                                    <pre
+                                        className="flex-1 p-4 overflow-x-auto font-mono text-sm leading-6 text-[var(--color-text-primary)]">
                                         <code>{fileContent}</code>
                                     </pre>
                                 </div>
                             </div>
 
                             {/* Footer */}
-                            <div className="px-4 py-2 bg-[var(--color-bg-primary)] border-t border-[var(--color-border-subtle)] text-xs text-[var(--color-text-dimmer)]">
+                            <div
+                                className="px-4 py-2 bg-[var(--color-bg-primary)] border-t border-[var(--color-border-subtle)] text-xs text-[var(--color-text-dimmer)]">
                                 {lines.length} lines • {(fileContent.length / 1024).toFixed(1)} KB • UTF-8
                             </div>
                         </>
                     ) : (
                         <div className="flex-1 flex items-center justify-center">
-                            <EmptyState type="files" message="Select a file to view contents" />
+                            <EmptyState type="files" message="Select a file to view contents"/>
                         </div>
                     )}
                 </div>

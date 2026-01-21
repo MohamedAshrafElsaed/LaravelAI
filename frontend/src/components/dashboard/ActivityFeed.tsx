@@ -1,7 +1,7 @@
 'use client';
 
-import { motion } from 'framer-motion';
-import { GitCommit, GitPullRequest, AlertCircle, CheckCircle2, Code2, FileEdit } from 'lucide-react';
+import {motion} from 'framer-motion';
+import {AlertCircle, CheckCircle2, Code2, FileEdit, GitCommit, GitPullRequest} from 'lucide-react';
 
 export interface Activity {
     id: string;
@@ -61,23 +61,23 @@ const defaultActivities: Activity[] = [
     },
 ];
 
-export default function ActivityFeed({ activities, loading = false }: ActivityFeedProps) {
+export default function ActivityFeed({activities, loading = false}: ActivityFeedProps) {
     const displayActivities = activities && activities.length > 0 ? activities : defaultActivities;
 
     const getIcon = (type: Activity['type']) => {
         switch (type) {
             case 'commit':
-                return <GitCommit size={14} className="text-blue-400" />;
+                return <GitCommit size={14} className="text-blue-400"/>;
             case 'pr':
-                return <GitPullRequest size={14} className="text-purple-400" />;
+                return <GitPullRequest size={14} className="text-purple-400"/>;
             case 'deploy':
-                return <CheckCircle2 size={14} className="text-green-400" />;
+                return <CheckCircle2 size={14} className="text-green-400"/>;
             case 'alert':
-                return <AlertCircle size={14} className="text-[var(--color-primary)]" />;
+                return <AlertCircle size={14} className="text-[var(--color-primary)]"/>;
             case 'change':
-                return <FileEdit size={14} className="text-cyan-400" />;
+                return <FileEdit size={14} className="text-cyan-400"/>;
             default:
-                return <Code2 size={14} className="text-[var(--color-text-muted)]" />;
+                return <Code2 size={14} className="text-[var(--color-text-muted)]"/>;
         }
     };
 
@@ -108,7 +108,8 @@ export default function ActivityFeed({ activities, loading = false }: ActivityFe
                     <span className="text-[10px] font-mono text-[var(--color-text-dimmer)]">LOADING</span>
                 </div>
                 <div className="flex-1 flex items-center justify-center">
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
+                    <div
+                        className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]"/>
                 </div>
             </div>
         );
@@ -129,9 +130,9 @@ export default function ActivityFeed({ activities, loading = false }: ActivityFe
                 {displayActivities.map((item, index) => (
                     <motion.div
                         key={item.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.05 }}
+                        initial={{opacity: 0, x: -10}}
+                        animate={{opacity: 1, x: 0}}
+                        transition={{delay: index * 0.05}}
                         className="group flex flex-col gap-1 p-3 rounded-sm border border-dashed border-[var(--color-border-subtle)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] transition-all cursor-default"
                     >
                         <div className="flex items-center justify-between">
@@ -158,7 +159,8 @@ export default function ActivityFeed({ activities, loading = false }: ActivityFe
 
                         <div className="flex items-center justify-between pl-6 mt-1">
                             <div className="flex items-center">
-                                <div className="w-4 h-4 rounded-full bg-[var(--color-bg-elevated)] flex items-center justify-center text-[8px] text-[var(--color-text-secondary)] mr-2">
+                                <div
+                                    className="w-4 h-4 rounded-full bg-[var(--color-bg-elevated)] flex items-center justify-center text-[8px] text-[var(--color-text-secondary)] mr-2">
                                     {item.user[0].toUpperCase()}
                                 </div>
                                 <span className="text-xs text-[var(--color-text-dimmer)]">{item.user}</span>

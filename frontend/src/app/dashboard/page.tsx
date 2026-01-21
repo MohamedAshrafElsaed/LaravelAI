@@ -1,9 +1,9 @@
 // frontend/src/app/dashboard/page.tsx
 'use client';
 
-import { motion } from 'framer-motion';
-import { RefreshCw } from 'lucide-react';
-import { useDashboard } from '@/hooks/useDashboardData';
+import {motion} from 'framer-motion';
+import {RefreshCw} from 'lucide-react';
+import {useDashboard} from '@/hooks/useDashboardData';
 
 // Components
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
@@ -42,9 +42,9 @@ export default function DashboardOverviewPage() {
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{opacity: 0, y: 10}}
+            animate={{opacity: 1, y: 0}}
+            exit={{opacity: 0, y: -10}}
             className="flex-1 p-6 overflow-y-auto"
         >
             <div className="grid grid-cols-12 gap-6">
@@ -72,7 +72,8 @@ export default function DashboardOverviewPage() {
                             className="p-2 rounded-lg border border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-surface)] transition-colors disabled:opacity-50"
                             title="Refresh data"
                         >
-                            <RefreshCw className={`h-4 w-4 text-[var(--color-text-muted)] ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw
+                                className={`h-4 w-4 text-[var(--color-text-muted)] ${loading ? 'animate-spin' : ''}`}/>
                         </button>
                     </div>
                 </div>
@@ -106,14 +107,16 @@ export default function DashboardOverviewPage() {
 
                     {/* Data Table - Git Changes */}
                     {changesLoading ? (
-                        <div className="flex items-center justify-center h-48 border border-[var(--color-border-subtle)] rounded-sm">
-                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
+                        <div
+                            className="flex items-center justify-center h-48 border border-[var(--color-border-subtle)] rounded-sm">
+                            <div
+                                className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]"/>
                         </div>
                     ) : deployments.length > 0 ? (
-                        <DataTable deployments={deployments} title="Recent Changes" />
+                        <DataTable deployments={deployments} title="Recent Changes"/>
                     ) : (
                         <div className="border border-[var(--color-border-subtle)] rounded-sm p-8">
-                            <EmptyState type="generic" message="No code changes yet" />
+                            <EmptyState type="generic" message="No code changes yet"/>
                         </div>
                     )}
 
@@ -135,21 +138,23 @@ export default function DashboardOverviewPage() {
                 {/* Right Sidebar */}
                 <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
                     {/* Activity Feed */}
-                    <div className="bg-[var(--color-bg-surface)]/30 border border-[var(--color-border-subtle)] rounded-sm p-4 h-[400px]">
+                    <div
+                        className="bg-[var(--color-bg-surface)]/30 border border-[var(--color-border-subtle)] rounded-sm p-4 h-[400px]">
                         {activitiesLoading ? (
                             <div className="flex items-center justify-center h-full">
-                                <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]" />
+                                <div
+                                    className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)]"/>
                             </div>
                         ) : activities.length > 0 ? (
-                            <ActivityFeed activities={activities} />
+                            <ActivityFeed activities={activities}/>
                         ) : (
-                            <EmptyState type="generic" message="No recent activity" />
+                            <EmptyState type="generic" message="No recent activity"/>
                         )}
                     </div>
 
                     {/* Chat Panel */}
                     <div className="border border-[var(--color-border-subtle)] rounded-sm overflow-hidden h-[350px]">
-                        <DevChatPanel projectId={selectedProject?.id} />
+                        <DevChatPanel projectId={selectedProject?.id}/>
                     </div>
                 </div>
             </div>

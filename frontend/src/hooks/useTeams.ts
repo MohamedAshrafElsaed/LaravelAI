@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
-import { useAuthStore } from '@/lib/store';
-import { useTeamStore, Team, TeamMember } from '@/lib/teamStore';
+import {useCallback} from 'react';
+import {useAuthStore} from '@/lib/store';
+import {Team, TeamMember, useTeamStore} from '@/lib/teamStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -20,7 +20,11 @@ interface UseTeamsReturn {
 
     // Member operations
     fetchMembers: (teamId: string) => Promise<void>;
-    inviteMember: (teamId: string, data: { github_username?: string; email?: string; role?: string }) => Promise<TeamMember>;
+    inviteMember: (teamId: string, data: {
+        github_username?: string;
+        email?: string;
+        role?: string
+    }) => Promise<TeamMember>;
     updateMemberRole: (teamId: string, memberId: string, role: string) => Promise<TeamMember>;
     removeMember: (teamId: string, memberId: string) => Promise<void>;
 
@@ -29,7 +33,7 @@ interface UseTeamsReturn {
 }
 
 export function useTeams(): UseTeamsReturn {
-    const { token } = useAuthStore();
+    const {token} = useAuthStore();
     const {
         teams,
         currentTeam,
@@ -92,7 +96,7 @@ export function useTeams(): UseTeamsReturn {
             const response = await fetch(`${API_BASE}/teams`, {
                 method: 'POST',
                 headers: headers(),
-                body: JSON.stringify({ name, description }),
+                body: JSON.stringify({name, description}),
             });
 
             if (!response.ok) {
@@ -240,7 +244,7 @@ export function useTeams(): UseTeamsReturn {
             const response = await fetch(`${API_BASE}/teams/${teamId}/members/${memberId}`, {
                 method: 'PATCH',
                 headers: headers(),
-                body: JSON.stringify({ role }),
+                body: JSON.stringify({role}),
             });
 
             if (!response.ok) {

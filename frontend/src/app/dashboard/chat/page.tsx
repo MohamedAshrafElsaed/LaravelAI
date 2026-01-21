@@ -1,21 +1,17 @@
 // frontend/src/app/dashboard/chat/page.tsx
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    MessageSquare, Plus, Trash2, Search, Loader2, Clock,
-    ChevronLeft, Bot, AlertCircle, FolderOpen
-} from 'lucide-react';
-import { useAuthStore } from '@/lib/store';
-import { projectsApi, chatApi, getErrorMessage } from '@/lib/api';
-import type { Project, Conversation } from '@/lib/api';
-import { ChatModule, type ChatModuleRef } from '@/components/chat';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {useRouter} from 'next/navigation';
+import {AlertCircle, Bot, Clock, FolderOpen, Loader2, MessageSquare, Plus, Search, Trash2} from 'lucide-react';
+import {useAuthStore} from '@/lib/store';
+import type {Conversation, Project} from '@/lib/api';
+import {chatApi, getErrorMessage, projectsApi} from '@/lib/api';
+import {ChatModule, type ChatModuleRef} from '@/components/chat';
 
 export default function DashboardChatPage() {
     const router = useRouter();
-    const { isAuthenticated, isHydrated } = useAuthStore();
+    const {isAuthenticated, isHydrated} = useAuthStore();
     const chatRef = useRef<ChatModuleRef>(null);
 
     // State
@@ -54,7 +50,7 @@ export default function DashboardChatPage() {
 
                 if (readyProjects.length === 0) {
                     console.log('[ChatPage] No ready projects found. Project statuses:',
-                        response.data.map(p => ({ name: p.name, status: p.status }))
+                        response.data.map(p => ({name: p.name, status: p.status}))
                     );
                 }
 
@@ -193,13 +189,13 @@ export default function DashboardChatPage() {
         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
         if (diffDays === 0) {
-            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'});
         } else if (diffDays === 1) {
             return 'Yesterday';
         } else if (diffDays < 7) {
-            return date.toLocaleDateString('en-US', { weekday: 'short' });
+            return date.toLocaleDateString('en-US', {weekday: 'short'});
         } else {
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
         }
     };
 
@@ -208,7 +204,7 @@ export default function DashboardChatPage() {
     if (!mounted || !isHydrated) {
         return (
             <div className="flex h-full items-center justify-center bg-[var(--color-bg-primary)]">
-                <Loader2 className="h-8 w-8 animate-spin text-[var(--color-primary)]" />
+                <Loader2 className="h-8 w-8 animate-spin text-[var(--color-primary)]"/>
             </div>
         );
     }
@@ -217,7 +213,7 @@ export default function DashboardChatPage() {
         return (
             <div className="flex h-full items-center justify-center bg-[var(--color-bg-primary)]">
                 <div className="text-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-[var(--color-primary)] mx-auto mb-4" />
+                    <Loader2 className="h-8 w-8 animate-spin text-[var(--color-primary)] mx-auto mb-4"/>
                     <p className="text-[var(--color-text-muted)]">Loading projects...</p>
                 </div>
             </div>
@@ -228,7 +224,7 @@ export default function DashboardChatPage() {
         return (
             <div className="flex h-full items-center justify-center bg-[var(--color-bg-primary)]">
                 <div className="text-center max-w-md px-4">
-                    <FolderOpen className="h-16 w-16 text-[var(--color-text-muted)] mx-auto mb-4" />
+                    <FolderOpen className="h-16 w-16 text-[var(--color-text-muted)] mx-auto mb-4"/>
                     <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
                         No Projects Ready
                     </h2>
@@ -249,7 +245,8 @@ export default function DashboardChatPage() {
     return (
         <div className="flex h-full bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
             {/* Sidebar */}
-            <aside className="w-72 flex-shrink-0 flex flex-col border-r border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <aside
+                className="w-72 flex-shrink-0 flex flex-col border-r border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 {/* Project Selector */}
                 <div className="p-3 border-b border-[var(--color-border-subtle)]">
                     <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-2">
@@ -279,7 +276,7 @@ export default function DashboardChatPage() {
                         onClick={handleNewChat}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-primary)] text-white font-medium hover:bg-[var(--color-primary-hover)] transition-colors"
                     >
-                        <Plus className="h-4 w-4" />
+                        <Plus className="h-4 w-4"/>
                         New Chat
                     </button>
                 </div>
@@ -287,7 +284,8 @@ export default function DashboardChatPage() {
                 {/* Search */}
                 <div className="px-3 py-2">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]" />
+                        <Search
+                            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]"/>
                         <input
                             type="text"
                             value={searchQuery}
@@ -302,11 +300,11 @@ export default function DashboardChatPage() {
                 <div className="flex-1 overflow-y-auto px-2 py-1">
                     {conversationsLoading ? (
                         <div className="flex items-center justify-center py-8">
-                            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+                            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]"/>
                         </div>
                     ) : filteredConversations.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-                            <Bot className="h-10 w-10 text-[var(--color-text-muted)] mb-2" />
+                            <Bot className="h-10 w-10 text-[var(--color-text-muted)] mb-2"/>
                             <p className="text-sm text-[var(--color-text-muted)]">
                                 {searchQuery ? 'No matching conversations' : 'No conversations yet'}
                             </p>
@@ -330,7 +328,7 @@ export default function DashboardChatPage() {
                                         currentConversationId === conv.id
                                             ? 'text-[var(--color-primary)]'
                                             : 'text-[var(--color-text-muted)]'
-                                    }`} />
+                                    }`}/>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between gap-2">
                       <span className={`text-sm font-medium truncate ${
@@ -357,9 +355,9 @@ export default function DashboardChatPage() {
                                         title="Delete conversation"
                                     >
                                         {deleteLoading === conv.id ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            <Loader2 className="h-4 w-4 animate-spin"/>
                                         ) : (
-                                            <Trash2 className="h-4 w-4" />
+                                            <Trash2 className="h-4 w-4"/>
                                         )}
                                     </button>
                                 </button>
@@ -371,7 +369,7 @@ export default function DashboardChatPage() {
                 {/* Footer */}
                 <div className="p-3 border-t border-[var(--color-border-subtle)]">
                     <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                        <Clock className="h-3.5 w-3.5" />
+                        <Clock className="h-3.5 w-3.5"/>
                         <span>{conversations.length} conversation{conversations.length !== 1 ? 's' : ''}</span>
                     </div>
                 </div>
@@ -391,7 +389,7 @@ export default function DashboardChatPage() {
                 ) : (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center">
-                            <AlertCircle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                            <AlertCircle className="h-12 w-12 text-amber-400 mx-auto mb-4"/>
                             <p className="text-[var(--color-text-muted)]">Select a project to start chatting</p>
                         </div>
                     </div>

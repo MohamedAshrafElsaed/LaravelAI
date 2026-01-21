@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {
+    AlertCircle,
     ChevronDown,
     ChevronRight,
     Database,
@@ -15,38 +16,37 @@ import {
     RefreshCw,
     Search,
     Settings,
-    AlertCircle,
 } from 'lucide-react';
-import { filesApi, FileNode } from '@/lib/api';
+import {FileNode, filesApi} from '@/lib/api';
 
 // ============== HELPERS ==============
 const getFileIcon = (fileName: string) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     switch (ext) {
         case 'php':
-            return <FileCode className="h-4 w-4 text-purple-400" />;
+            return <FileCode className="h-4 w-4 text-purple-400"/>;
         case 'blade':
-            return <Layout className="h-4 w-4 text-orange-400" />;
+            return <Layout className="h-4 w-4 text-orange-400"/>;
         case 'vue':
         case 'jsx':
         case 'tsx':
-            return <FileCode className="h-4 w-4 text-green-400" />;
+            return <FileCode className="h-4 w-4 text-green-400"/>;
         case 'js':
         case 'ts':
-            return <FileCode className="h-4 w-4 text-yellow-400" />;
+            return <FileCode className="h-4 w-4 text-yellow-400"/>;
         case 'css':
         case 'scss':
-            return <FileText className="h-4 w-4 text-blue-400" />;
+            return <FileText className="h-4 w-4 text-blue-400"/>;
         case 'json':
         case 'yaml':
         case 'yml':
-            return <Settings className="h-4 w-4 text-gray-400" />;
+            return <Settings className="h-4 w-4 text-gray-400"/>;
         case 'sql':
-            return <Database className="h-4 w-4 text-cyan-400" />;
+            return <Database className="h-4 w-4 text-cyan-400"/>;
         case 'md':
-            return <FileText className="h-4 w-4 text-gray-400" />;
+            return <FileText className="h-4 w-4 text-gray-400"/>;
         default:
-            return <File className="h-4 w-4 text-gray-400" />;
+            return <File className="h-4 w-4 text-gray-400"/>;
     }
 };
 
@@ -78,24 +78,24 @@ function TreeNode({
                         ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)]'
                         : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]'
                 }`}
-                style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                style={{paddingLeft: `${depth * 12 + 8}px`}}
                 onClick={() => isDirectory ? toggleExpand(node.path) : onSelect(node)}
             >
                 {isDirectory ? (
                     <span className="w-4">
-                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        {isExpanded ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>}
                     </span>
-                ) : <span className="w-4" />}
+                ) : <span className="w-4"/>}
 
                 {isDirectory ? (
-                    isExpanded ? <FolderOpen className="h-4 w-4 text-yellow-500" /> :
-                        <Folder className="h-4 w-4 text-yellow-500" />
+                    isExpanded ? <FolderOpen className="h-4 w-4 text-yellow-500"/> :
+                        <Folder className="h-4 w-4 text-yellow-500"/>
                 ) : getFileIcon(node.name)}
 
                 <span className="truncate flex-1">{node.name}</span>
 
                 {node.indexed && (
-                    <span className="h-2 w-2 rounded-full bg-green-500" title="Indexed" />
+                    <span className="h-2 w-2 rounded-full bg-green-500" title="Indexed"/>
                 )}
             </div>
 
@@ -246,7 +246,7 @@ export default function DevFileExplorer({
             .map((node) => {
                 if (node.type === 'directory' && node.children) {
                     const filtered = filterTree(node.children, query);
-                    if (filtered.length > 0) return { ...node, children: filtered };
+                    if (filtered.length > 0) return {...node, children: filtered};
                 }
                 if (node.name.toLowerCase().includes(query.toLowerCase())) return node;
                 return null;
@@ -260,7 +260,7 @@ export default function DevFileExplorer({
     if (!projectId) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4">
-                <AlertCircle className="h-8 w-8 text-yellow-500 mb-2" />
+                <AlertCircle className="h-8 w-8 text-yellow-500 mb-2"/>
                 <p className="text-sm text-[var(--color-text-muted)] text-center">
                     Select a project to view files
                 </p>
@@ -272,7 +272,7 @@ export default function DevFileExplorer({
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center h-full">
-                <RefreshCw className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+                <RefreshCw className="h-6 w-6 animate-spin text-[var(--color-text-muted)]"/>
                 <span className="mt-2 text-sm text-[var(--color-text-muted)]">Loading files...</span>
             </div>
         );
@@ -282,7 +282,7 @@ export default function DevFileExplorer({
     if (error) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4">
-                <AlertCircle className="h-8 w-8 text-red-400 mb-2" />
+                <AlertCircle className="h-8 w-8 text-red-400 mb-2"/>
                 <p className="text-sm text-red-400 text-center mb-2">{error}</p>
                 <button
                     onClick={fetchTree}
@@ -299,7 +299,7 @@ export default function DevFileExplorer({
             {/* Header */}
             <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--color-border-subtle)]">
                 <div className="flex items-center gap-2">
-                    <FolderTree className="h-4 w-4 text-[var(--color-text-muted)]" />
+                    <FolderTree className="h-4 w-4 text-[var(--color-text-muted)]"/>
                     <span className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
                         Explorer
                     </span>
@@ -309,14 +309,15 @@ export default function DevFileExplorer({
                     className="p-1 hover:bg-[var(--color-bg-hover)] rounded"
                     title="Refresh"
                 >
-                    <RefreshCw className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
+                    <RefreshCw className="h-3.5 w-3.5 text-[var(--color-text-muted)]"/>
                 </button>
             </div>
 
             {/* Search */}
             <div className="p-2 border-b border-[var(--color-border-subtle)]">
                 <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-dimmer)]" />
+                    <Search
+                        className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-dimmer)]"/>
                     <input
                         type="text"
                         value={searchQuery}
@@ -349,7 +350,8 @@ export default function DevFileExplorer({
             </div>
 
             {/* Footer */}
-            <div className="px-3 py-2 border-t border-[var(--color-border-subtle)] text-[10px] text-[var(--color-text-dimmer)]">
+            <div
+                className="px-3 py-2 border-t border-[var(--color-border-subtle)] text-[10px] text-[var(--color-text-dimmer)]">
                 {tree.length > 0 ? `${tree.length} root items` : 'No files'}
             </div>
         </div>

@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import {create} from 'zustand';
+import {persist} from 'zustand/middleware';
 
 export interface TeamMember {
     id: string;
@@ -66,11 +66,11 @@ export const useTeamStore = create<TeamState>()(
         (set) => ({
             ...initialState,
 
-            setTeams: (teams) => set({ teams }),
+            setTeams: (teams) => set({teams}),
 
-            setCurrentTeam: (team) => set({ currentTeam: team }),
+            setCurrentTeam: (team) => set({currentTeam: team}),
 
-            setMembers: (members) => set({ members }),
+            setMembers: (members) => set({members}),
 
             addTeam: (team) => set((state) => ({
                 teams: [...state.teams, team],
@@ -78,10 +78,10 @@ export const useTeamStore = create<TeamState>()(
 
             updateTeam: (id, updates) => set((state) => ({
                 teams: state.teams.map((t) =>
-                    t.id === id ? { ...t, ...updates } : t
+                    t.id === id ? {...t, ...updates} : t
                 ),
                 currentTeam: state.currentTeam?.id === id
-                    ? { ...state.currentTeam, ...updates }
+                    ? {...state.currentTeam, ...updates}
                     : state.currentTeam,
             })),
 
@@ -96,7 +96,7 @@ export const useTeamStore = create<TeamState>()(
 
             updateMember: (id, updates) => set((state) => ({
                 members: state.members.map((m) =>
-                    m.id === id ? { ...m, ...updates } : m
+                    m.id === id ? {...m, ...updates} : m
                 ),
             })),
 
@@ -104,9 +104,9 @@ export const useTeamStore = create<TeamState>()(
                 members: state.members.filter((m) => m.id !== id),
             })),
 
-            setLoading: (loading) => set({ loading }),
+            setLoading: (loading) => set({loading}),
 
-            setError: (error) => set({ error }),
+            setError: (error) => set({error}),
 
             reset: () => set(initialState),
         }),

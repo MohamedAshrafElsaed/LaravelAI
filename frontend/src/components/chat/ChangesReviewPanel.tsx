@@ -1,15 +1,28 @@
 // frontend/src/components/chat/ChangesReviewPanel.tsx
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, {useMemo, useState} from 'react';
+import {AnimatePresence, motion} from 'framer-motion';
 import {
-    GitBranch, GitPullRequest, FileCode, Plus, Minus, Edit3, X,
-    ChevronDown, ChevronRight, Check, Copy, ExternalLink, Loader2,
-    AlertCircle, Download, Play
+    AlertCircle,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Copy,
+    Download,
+    Edit3,
+    ExternalLink,
+    FileCode,
+    GitBranch,
+    GitPullRequest,
+    Loader2,
+    Minus,
+    Play,
+    Plus,
+    X
 } from 'lucide-react';
-import { gitApi, gitChangesApi } from '@/lib/api';
-import type { GitChangeFile } from './types';
+import {gitApi, gitChangesApi} from '@/lib/api';
+import type {GitChangeFile} from './types';
 
 // ============== CHANGES REVIEW PANEL ==============
 interface ChangesReviewPanelProps {
@@ -167,7 +180,7 @@ export function ChangesReviewPanel({
             .map(c => `# ${c.action}: ${c.file}\n${c.diff || c.content || ''}`)
             .join('\n\n');
 
-        const blob = new Blob([patchContent], { type: 'text/plain' });
+        const blob = new Blob([patchContent], {type: 'text/plain'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -179,13 +192,13 @@ export function ChangesReviewPanel({
     const getActionIcon = (action: string) => {
         switch (action) {
             case 'create':
-                return <Plus className="h-4 w-4 text-green-400" />;
+                return <Plus className="h-4 w-4 text-green-400"/>;
             case 'modify':
-                return <Edit3 className="h-4 w-4 text-amber-400" />;
+                return <Edit3 className="h-4 w-4 text-amber-400"/>;
             case 'delete':
-                return <Minus className="h-4 w-4 text-red-400" />;
+                return <Minus className="h-4 w-4 text-red-400"/>;
             default:
-                return <FileCode className="h-4 w-4 text-gray-400" />;
+                return <FileCode className="h-4 w-4 text-gray-400"/>;
         }
     };
 
@@ -204,16 +217,17 @@ export function ChangesReviewPanel({
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
+            initial={{opacity: 0, y: 20}}
+            animate={{opacity: 1, y: 0}}
+            exit={{opacity: 0, y: -20}}
             className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] overflow-hidden"
         >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-[var(--color-bg-surface)] border-b border-[var(--color-border-subtle)]">
+            <div
+                className="flex items-center justify-between px-4 py-3 bg-[var(--color-bg-surface)] border-b border-[var(--color-border-subtle)]">
                 <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-purple-500/20">
-                        <GitBranch className="h-5 w-5 text-purple-400" />
+                        <GitBranch className="h-5 w-5 text-purple-400"/>
                     </div>
                     <div>
                         <h3 className="font-semibold text-[var(--color-text-primary)]">Review Changes</h3>
@@ -229,15 +243,16 @@ export function ChangesReviewPanel({
                     onClick={onClose}
                     className="p-2 rounded-lg hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]"
                 >
-                    <X className="h-5 w-5" />
+                    <X className="h-5 w-5"/>
                 </button>
             </div>
 
             {/* Success banner */}
             {prUrl && (
-                <div className="px-4 py-3 bg-green-500/10 border-b border-green-500/20 flex items-center justify-between">
+                <div
+                    className="px-4 py-3 bg-green-500/10 border-b border-green-500/20 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-green-400">
-                        <Check className="h-5 w-5" />
+                        <Check className="h-5 w-5"/>
                         <span className="text-sm font-medium">Pull Request created successfully!</span>
                     </div>
                     <a
@@ -246,7 +261,7 @@ export function ChangesReviewPanel({
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-400 transition-colors"
                     >
-                        <ExternalLink className="h-4 w-4" />
+                        <ExternalLink className="h-4 w-4"/>
                         View PR
                     </a>
                 </div>
@@ -254,8 +269,9 @@ export function ChangesReviewPanel({
 
             {/* Applied branch info */}
             {appliedBranch && !prUrl && (
-                <div className="px-4 py-2 bg-purple-500/10 border-b border-purple-500/20 flex items-center gap-2 text-sm text-purple-400">
-                    <GitBranch className="h-4 w-4" />
+                <div
+                    className="px-4 py-2 bg-purple-500/10 border-b border-purple-500/20 flex items-center gap-2 text-sm text-purple-400">
+                    <GitBranch className="h-4 w-4"/>
                     <span>Changes applied to branch: <strong>{appliedBranch}</strong></span>
                 </div>
             )}
@@ -264,14 +280,14 @@ export function ChangesReviewPanel({
             <AnimatePresence>
                 {showPRForm && !prUrl && (
                     <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
+                        initial={{height: 0, opacity: 0}}
+                        animate={{height: 'auto', opacity: 1}}
+                        exit={{height: 0, opacity: 0}}
                         className="border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]"
                     >
                         <div className="px-4 py-3 space-y-3">
                             <h4 className="text-sm font-medium text-[var(--color-text-primary)] flex items-center gap-2">
-                                <GitPullRequest className="h-4 w-4 text-purple-400" />
+                                <GitPullRequest className="h-4 w-4 text-purple-400"/>
                                 Create Pull Request
                             </h4>
                             <input
@@ -295,9 +311,9 @@ export function ChangesReviewPanel({
                                     className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500 text-white text-sm font-medium hover:bg-purple-400 disabled:opacity-50 transition-colors"
                                 >
                                     {isCreatingPR ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <Loader2 className="h-4 w-4 animate-spin"/>
                                     ) : (
-                                        <GitPullRequest className="h-4 w-4" />
+                                        <GitPullRequest className="h-4 w-4"/>
                                     )}
                                     Create PR
                                 </button>
@@ -315,11 +331,12 @@ export function ChangesReviewPanel({
 
             {/* Error */}
             {error && (
-                <div className="px-4 py-3 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2 text-red-400 text-sm">
-                    <AlertCircle className="h-4 w-4" />
+                <div
+                    className="px-4 py-3 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2 text-red-400 text-sm">
+                    <AlertCircle className="h-4 w-4"/>
                     <span>{error}</span>
                     <button onClick={() => setError(null)} className="ml-auto hover:text-red-300">
-                        <X className="h-4 w-4" />
+                        <X className="h-4 w-4"/>
                     </button>
                 </div>
             )}
@@ -334,15 +351,16 @@ export function ChangesReviewPanel({
                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--color-bg-hover)] transition-colors text-left"
                         >
                             {expandedFiles.has(change.file) ? (
-                                <ChevronDown className="h-4 w-4 text-[var(--color-text-muted)]" />
+                                <ChevronDown className="h-4 w-4 text-[var(--color-text-muted)]"/>
                             ) : (
-                                <ChevronRight className="h-4 w-4 text-[var(--color-text-muted)]" />
+                                <ChevronRight className="h-4 w-4 text-[var(--color-text-muted)]"/>
                             )}
                             {getActionIcon(change.action)}
                             <span className="flex-1 truncate text-sm text-[var(--color-text-primary)]">
                 {change.file}
               </span>
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getActionColor(change.action)}`}>
+                            <span
+                                className={`px-2 py-0.5 rounded text-xs font-medium ${getActionColor(change.action)}`}>
                 {change.action}
               </span>
                         </button>
@@ -351,9 +369,9 @@ export function ChangesReviewPanel({
                         <AnimatePresence>
                             {expandedFiles.has(change.file) && (change.content || change.diff) && (
                                 <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
+                                    initial={{height: 0, opacity: 0}}
+                                    animate={{height: 'auto', opacity: 1}}
+                                    exit={{height: 0, opacity: 0}}
                                     className="border-t border-[var(--color-border-subtle)] bg-black/20"
                                 >
                                     <div className="relative">
@@ -363,9 +381,9 @@ export function ChangesReviewPanel({
                                             title="Copy code"
                                         >
                                             {copied === change.file ? (
-                                                <Check className="h-4 w-4 text-green-400" />
+                                                <Check className="h-4 w-4 text-green-400"/>
                                             ) : (
-                                                <Copy className="h-4 w-4" />
+                                                <Copy className="h-4 w-4"/>
                                             )}
                                         </button>
                                         <CodeBlock
@@ -381,12 +399,13 @@ export function ChangesReviewPanel({
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-between px-4 py-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-subtle)]">
+            <div
+                className="flex items-center justify-between px-4 py-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-subtle)]">
                 <button
                     onClick={handleDownloadPatch}
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 >
-                    <Download className="h-4 w-4" />
+                    <Download className="h-4 w-4"/>
                     Download Patch
                 </button>
 
@@ -398,9 +417,9 @@ export function ChangesReviewPanel({
                             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-primary)] text-white text-sm font-medium hover:bg-[var(--color-primary-hover)] disabled:opacity-50 transition-colors"
                         >
                             {isApplying ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="h-4 w-4 animate-spin"/>
                             ) : (
-                                <Play className="h-4 w-4" />
+                                <Play className="h-4 w-4"/>
                             )}
                             Apply Changes
                         </button>
@@ -410,7 +429,7 @@ export function ChangesReviewPanel({
                             onClick={() => setShowPRForm(true)}
                             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500 text-white text-sm font-medium hover:bg-purple-400 transition-colors"
                         >
-                            <GitPullRequest className="h-4 w-4" />
+                            <GitPullRequest className="h-4 w-4"/>
                             Create PR
                         </button>
                     )}
@@ -426,7 +445,7 @@ interface CodeBlockProps {
     maxHeight?: string;
 }
 
-function CodeBlock({ code, maxHeight = '300px' }: CodeBlockProps) {
+function CodeBlock({code, maxHeight = '300px'}: CodeBlockProps) {
     const lines = code.split('\n');
 
     const getLineClass = (line: string): string => {
@@ -446,7 +465,7 @@ function CodeBlock({ code, maxHeight = '300px' }: CodeBlockProps) {
     };
 
     return (
-        <div className="font-mono text-xs overflow-auto" style={{ maxHeight }}>
+        <div className="font-mono text-xs overflow-auto" style={{maxHeight}}>
       <pre className="p-4 m-0">
         <code>
           {lines.map((line, i) => (

@@ -1,13 +1,13 @@
 // frontend/src/components/chat/index.ts
 
 // Main component
-export { ChatModule, type ChatModuleProps, type ChatModuleRef } from './ChatModule';
+export {ChatModule, type ChatModuleProps, type ChatModuleRef} from './ChatModule';
 
 // Sub-components
-export { AgentBadge, AgentAvatar, AgentThinking, AgentHandoff, AGENT_CONFIG, getAgentInfo } from './AgentBadge';
-export { AgentTimeline, AgentSummaryBar } from './AgentTimeline';
-export { PlanApprovalCard } from './PlanApprovalCard';
-export { ChangesReviewPanel } from './ChangesReviewPanel';
+export {AgentBadge, AgentAvatar, AgentThinking, AgentHandoff, AGENT_CONFIG, getAgentInfo} from './AgentBadge';
+export {AgentTimeline, AgentSummaryBar} from './AgentTimeline';
+export {PlanApprovalCard} from './PlanApprovalCard';
+export {ChangesReviewPanel} from './ChangesReviewPanel';
 
 // Types
 export type {
@@ -43,4 +43,4 @@ export type {
 } from './types';
 
 // Default export
-export { ChatModule as default } from './ChatModule';
+export {ChatModule as default} from './ChatModule';

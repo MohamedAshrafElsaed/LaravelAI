@@ -1,19 +1,19 @@
 // frontend/src/hooks/useChat.ts
 // Enhanced chat hook with full SSE streaming, agent conversations, and plan approval
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { chatApi, getErrorMessage } from '@/lib/api';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {chatApi, getErrorMessage} from '@/lib/api';
 import type {
+    AgentInfo,
+    AgentThinkingState,
+    AgentType,
+    ConversationEntry,
+    InteractiveEvent,
     Message,
     Plan,
     ValidationResult,
-    ConversationEntry,
-    AgentThinkingState,
-    AgentInfo,
-    AgentType,
-    InteractiveEvent,
 } from '@/components/chat/types';
-import { AGENT_CONFIG } from '@/components/chat/AgentBadge';
+import {AGENT_CONFIG} from '@/components/chat/AgentBadge';
 
 // ============== TYPES ==============
 export interface UseChatOptions {
@@ -107,7 +107,7 @@ export function useChat({
     }, []);
 
     const addEntry = useCallback((entry: Omit<ConversationEntry, 'id'>) => {
-        const newEntry = { ...entry, id: generateEntryId() };
+        const newEntry = {...entry, id: generateEntryId()};
         setConversationEntries((prev) => [...prev, newEntry]);
     }, [generateEntryId]);
 
@@ -135,7 +135,7 @@ export function useChat({
     }, [processingStateKey]);
 
     const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
     }, []);
 
     // ============== LIFECYCLE ==============
@@ -191,7 +191,7 @@ export function useChat({
             } else if (line.startsWith('data:') && currentEvent) {
                 try {
                     const data = JSON.parse(line.substring(5).trim());
-                    events.push({ event: currentEvent as any, data });
+                    events.push({event: currentEvent as any, data});
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
@@ -203,7 +203,7 @@ export function useChat({
 
     // ============== EVENT PROCESSING ==============
     const processAgentEvent = useCallback((event: InteractiveEvent) => {
-        const { event: eventType, data } = event;
+        const {event: eventType, data} = event;
         const timestamp = data.timestamp || new Date().toISOString();
 
         const getAgent = (agentType: string): AgentInfo => {
@@ -306,7 +306,7 @@ export function useChat({
                     const updated = [...prev];
                     for (let i = updated.length - 1; i >= 0; i--) {
                         if (updated[i].type === 'step' && !updated[i].completed) {
-                            updated[i] = { ...updated[i], completed: true };
+                            updated[i] = {...updated[i], completed: true};
                             break;
                         }
                     }
@@ -361,7 +361,7 @@ export function useChat({
     }, [addEntry]);
 
     const handleEvent = useCallback((event: InteractiveEvent) => {
-        const { event: eventType, data } = event;
+        const {event: eventType, data} = event;
         processAgentEvent(event);
 
         switch (eventType) {
@@ -491,10 +491,10 @@ export function useChat({
             let buffer = '';
 
             while (true) {
-                const { done, value } = await reader.read();
+                const {done, value} = await reader.read();
                 if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
+                buffer += decoder.decode(value, {stream: true});
                 const events = parseSSEChunk(buffer);
                 buffer = '';
 

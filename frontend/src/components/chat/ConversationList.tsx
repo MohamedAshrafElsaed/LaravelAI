@@ -3,14 +3,11 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    MessageSquare, Plus, Trash2, Search, Loader2, Clock,
-    MoreHorizontal, Archive, Pin, Edit2, Check, X
-} from 'lucide-react';
-import { chatApi } from '@/lib/api';
-import type { Conversation } from './types';
+import React, {useCallback, useEffect, useState} from 'react';
+import {AnimatePresence, motion} from 'framer-motion';
+import {Clock, Loader2, MessageSquare, MoreHorizontal, Plus, Search, Trash2} from 'lucide-react';
+import {chatApi} from '@/lib/api';
+import type {Conversation} from './types';
 
 interface ConversationListProps {
     projectId: string;
@@ -104,7 +101,7 @@ export function ConversationList({
         if (diffHours < 24) return `${diffHours}h ago`;
         if (diffDays === 1) return 'Yesterday';
         if (diffDays < 7) return `${diffDays}d ago`;
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
     };
 
     // Click outside to close menu
@@ -126,7 +123,7 @@ export function ConversationList({
                         compact ? 'px-3 py-2 text-xs' : 'px-4 py-2.5 text-sm'
                     }`}
                 >
-                    <Plus className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+                    <Plus className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'}/>
                     New Chat
                 </button>
             </div>
@@ -135,7 +132,8 @@ export function ConversationList({
             {showSearch && (
                 <div className="p-2">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]" />
+                        <Search
+                            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]"/>
                         <input
                             type="text"
                             value={searchQuery}
@@ -152,11 +150,11 @@ export function ConversationList({
             {/* Conversation List */}
             <div
                 className="flex-1 overflow-y-auto custom-scrollbar"
-                style={{ maxHeight }}
+                style={{maxHeight}}
             >
                 {loading ? (
                     <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+                        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]"/>
                     </div>
                 ) : error ? (
                     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
@@ -170,7 +168,7 @@ export function ConversationList({
                     </div>
                 ) : filteredConversations.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-                        <MessageSquare className="h-8 w-8 text-[var(--color-text-muted)] mb-2" />
+                        <MessageSquare className="h-8 w-8 text-[var(--color-text-muted)] mb-2"/>
                         <p className="text-sm text-[var(--color-text-muted)]">
                             {searchQuery ? 'No matching conversations' : 'No conversations yet'}
                         </p>
@@ -221,7 +219,8 @@ export function ConversationList({
                             >
                               {conv.title || 'New conversation'}
                             </span>
-                                                        <span className="text-[10px] text-[var(--color-text-muted)] flex-shrink-0">
+                                                        <span
+                                                            className="text-[10px] text-[var(--color-text-muted)] flex-shrink-0">
                               {formatTime(conv.updated_at)}
                             </span>
                                                     </div>
@@ -246,16 +245,16 @@ export function ConversationList({
                                                 }}
                                                 className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] transition-opacity"
                                             >
-                                                <MoreHorizontal className="h-4 w-4" />
+                                                <MoreHorizontal className="h-4 w-4"/>
                                             </button>
 
                                             {/* Context menu */}
                                             <AnimatePresence>
                                                 {menuOpen === conv.id && (
                                                     <motion.div
-                                                        initial={{ opacity: 0, scale: 0.95 }}
-                                                        animate={{ opacity: 1, scale: 1 }}
-                                                        exit={{ opacity: 0, scale: 0.95 }}
+                                                        initial={{opacity: 0, scale: 0.95}}
+                                                        animate={{opacity: 1, scale: 1}}
+                                                        exit={{opacity: 0, scale: 0.95}}
                                                         className="absolute top-8 right-2 z-10 w-36 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] shadow-lg py-1"
                                                     >
                                                         <button
@@ -267,9 +266,9 @@ export function ConversationList({
                                                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
                                                         >
                                                             {deleteLoading === conv.id ? (
-                                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                                <Loader2 className="h-3.5 w-3.5 animate-spin"/>
                                                             ) : (
-                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                                <Trash2 className="h-3.5 w-3.5"/>
                                                             )}
                                                             Delete
                                                         </button>
@@ -289,7 +288,7 @@ export function ConversationList({
             <div className="p-2 border-t border-[var(--color-border-subtle)]">
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-text-muted)]">
                     <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
+                        <Clock className="h-3 w-3"/>
                         <span>{conversations.length} conversations</span>
                     </div>
                     <button

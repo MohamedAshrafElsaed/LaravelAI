@@ -1,4 +1,3 @@
-
 // ============== AGENT TYPES ==============
 export type AgentType = 'nova' | 'scout' | 'blueprint' | 'forge' | 'guardian' | 'conductor';
 
