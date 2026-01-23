@@ -1,9 +1,6 @@
 """
 Laravel AI - FastAPI Application Entry Point
 """
-"""
-FastAPI application entry point with all routers.
-"""
 import logging
 from contextlib import asynccontextmanager
 
@@ -18,7 +15,6 @@ from app.api import (
     projects,
     chat,
     git,
-    git_changes,
     usage,
     health,
     teams,
@@ -63,47 +59,50 @@ app.include_router(health.router, tags=["health"])
 
 app.include_router(
     auth.router,
-    prefix="/api/v1/auth",
+    prefix=f"{settings.api_prefix}/auth",
     tags=["auth"],
 )
 
 app.include_router(
     github.router,
-    prefix="/api/v1/github",
+    prefix=f"{settings.api_prefix}/github",
     tags=["github"],
 )
 
 app.include_router(
     projects.router,
-    prefix="/api/v1/projects",
+    prefix=f"{settings.api_prefix}/projects",
     tags=["projects"],
 )
 
 app.include_router(
     chat.router,
-    prefix="/api/v1/projects",
+    prefix=f"{settings.api_prefix}/projects",
     tags=["chat"],
 )
 
 app.include_router(
     git.router,
-    prefix="/api/v1",
+    prefix=f"{settings.api_prefix}/projects",
     tags=["git"],
 )
 
 app.include_router(
-    git_changes.router, prefix=f"{settings.api_prefix}/projects", tags=["Git Changes"]
-)
-
-app.include_router(
-    usage.router, prefix=f"{settings.api_prefix}/usage", tags=["Usage"]
-)
-
-# NEW: GitHub data (issues, actions, projects, insights)
-app.include_router(
     github_data.router,
-    prefix="/api/v1/github-data",
+    prefix=f"{settings.api_prefix}/projects",
     tags=["github-data"],
+)
+
+app.include_router(
+    usage.router,
+    prefix=f"{settings.api_prefix}/usage",
+    tags=["usage"],
+)
+
+app.include_router(
+    teams.router,
+    prefix=f"{settings.api_prefix}/teams",
+    tags=["teams"],
 )
 
 

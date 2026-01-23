@@ -1,6 +1,3 @@
-# ============================================================================
-# FILE: backend/app/api/github_data.py
-# ============================================================================
 """
 GitHub data API endpoints.
 
@@ -155,7 +152,6 @@ async def get_project_with_access(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Check access via team or direct ownership
     service = TeamService(db)
     has_access = await service.check_project_access(project_id, str(user.id))
 
@@ -177,7 +173,7 @@ def get_github_token(user: User) -> str:
 
 # ============== Issues Endpoints ==============
 
-@router.get("/projects/{project_id}/issues", response_model=List[GitHubIssueResponse])
+@router.get("/{project_id}/issues", response_model=List[GitHubIssueResponse])
 async def list_issues(
         project_id: str,
         state: Optional[str] = Query(None, description="Filter by state: open, closed, all"),
@@ -186,12 +182,8 @@ async def list_issues(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    List cached GitHub issues for a project.
-
-    Use POST /sync/issues to refresh from GitHub.
-    """
-    logger.info(f"[GITHUB_DATA] GET /projects/{project_id}/issues")
+    """List cached GitHub issues for a project."""
+    logger.info(f"[GITHUB_DATA] GET /{project_id}/issues")
 
     await get_project_with_access(project_id, current_user, db)
 
@@ -208,7 +200,7 @@ async def list_issues(
     return issues
 
 
-@router.post("/projects/{project_id}/sync/issues", response_model=SyncResponse)
+@router.post("/{project_id}/sync/issues", response_model=SyncResponse)
 async def sync_issues(
         project_id: str,
         state: str = Query("all", description="State to sync: open, closed, all"),
@@ -216,12 +208,8 @@ async def sync_issues(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Sync issues from GitHub.
-
-    Fetches latest issues and updates local cache.
-    """
-    logger.info(f"[GITHUB_DATA] POST /projects/{project_id}/sync/issues")
+    """Sync issues from GitHub."""
+    logger.info(f"[GITHUB_DATA] POST /{project_id}/sync/issues")
 
     project = await get_project_with_access(project_id, current_user, db)
     github_token = get_github_token(current_user)
@@ -241,7 +229,7 @@ async def sync_issues(
 
 # ============== Actions Endpoints ==============
 
-@router.get("/projects/{project_id}/actions", response_model=List[GitHubActionResponse])
+@router.get("/{project_id}/actions", response_model=List[GitHubActionResponse])
 async def list_actions(
         project_id: str,
         status: Optional[str] = Query(None, description="Filter by status"),
@@ -250,12 +238,8 @@ async def list_actions(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    List cached GitHub Actions workflow runs.
-
-    Use POST /sync/actions to refresh from GitHub.
-    """
-    logger.info(f"[GITHUB_DATA] GET /projects/{project_id}/actions")
+    """List cached GitHub Actions workflow runs."""
+    logger.info(f"[GITHUB_DATA] GET /{project_id}/actions")
 
     await get_project_with_access(project_id, current_user, db)
 
@@ -272,19 +256,15 @@ async def list_actions(
     return actions
 
 
-@router.post("/projects/{project_id}/sync/actions", response_model=SyncResponse)
+@router.post("/{project_id}/sync/actions", response_model=SyncResponse)
 async def sync_actions(
         project_id: str,
         limit: int = Query(50, ge=1, le=200),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Sync GitHub Actions workflow runs.
-
-    Fetches latest runs and updates local cache.
-    """
-    logger.info(f"[GITHUB_DATA] POST /projects/{project_id}/sync/actions")
+    """Sync GitHub Actions workflow runs."""
+    logger.info(f"[GITHUB_DATA] POST /{project_id}/sync/actions")
 
     project = await get_project_with_access(project_id, current_user, db)
     github_token = get_github_token(current_user)
@@ -304,19 +284,15 @@ async def sync_actions(
 
 # ============== GitHub Projects Endpoints ==============
 
-@router.get("/projects/{project_id}/github-projects", response_model=List[GitHubProjectResponse])
+@router.get("/{project_id}/github-projects", response_model=List[GitHubProjectResponse])
 async def list_github_projects(
         project_id: str,
         state: Optional[str] = Query(None, description="Filter by state: open, closed"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    List cached GitHub Projects.
-
-    Use POST /sync/github-projects to refresh from GitHub.
-    """
-    logger.info(f"[GITHUB_DATA] GET /projects/{project_id}/github-projects")
+    """List cached GitHub Projects."""
+    logger.info(f"[GITHUB_DATA] GET /{project_id}/github-projects")
 
     await get_project_with_access(project_id, current_user, db)
 
@@ -333,18 +309,14 @@ async def list_github_projects(
     return projects
 
 
-@router.post("/projects/{project_id}/sync/github-projects", response_model=SyncResponse)
+@router.post("/{project_id}/sync/github-projects", response_model=SyncResponse)
 async def sync_github_projects(
         project_id: str,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Sync GitHub Projects (classic).
-
-    Fetches projects and updates local cache.
-    """
-    logger.info(f"[GITHUB_DATA] POST /projects/{project_id}/sync/github-projects")
+    """Sync GitHub Projects (classic)."""
+    logger.info(f"[GITHUB_DATA] POST /{project_id}/sync/github-projects")
 
     project = await get_project_with_access(project_id, current_user, db)
     github_token = get_github_token(current_user)
@@ -364,18 +336,14 @@ async def sync_github_projects(
 
 # ============== Insights Endpoints ==============
 
-@router.get("/projects/{project_id}/insights", response_model=GitHubInsightsResponse)
+@router.get("/{project_id}/insights", response_model=GitHubInsightsResponse)
 async def get_insights(
         project_id: str,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Get cached repository insights.
-
-    Use POST /sync/insights to refresh from GitHub.
-    """
-    logger.info(f"[GITHUB_DATA] GET /projects/{project_id}/insights")
+    """Get cached repository insights."""
+    logger.info(f"[GITHUB_DATA] GET /{project_id}/insights")
 
     await get_project_with_access(project_id, current_user, db)
 
@@ -392,24 +360,14 @@ async def get_insights(
     return insights
 
 
-@router.post("/projects/{project_id}/sync/insights", response_model=GitHubInsightsResponse)
+@router.post("/{project_id}/sync/insights", response_model=GitHubInsightsResponse)
 async def sync_insights(
         project_id: str,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Sync repository insights from GitHub.
-
-    Fetches stats including:
-    - Stars, forks, watchers
-    - Traffic (views, clones)
-    - Code frequency
-    - Commit activity
-    - Top contributors
-    - Language breakdown
-    """
-    logger.info(f"[GITHUB_DATA] POST /projects/{project_id}/sync/insights")
+    """Sync repository insights from GitHub."""
+    logger.info(f"[GITHUB_DATA] POST /{project_id}/sync/insights")
 
     project = await get_project_with_access(project_id, current_user, db)
     github_token = get_github_token(current_user)
@@ -425,35 +383,24 @@ async def sync_insights(
 
 # ============== Full Sync Endpoint ==============
 
-@router.post("/projects/{project_id}/sync/all", response_model=FullSyncResponse)
+@router.post("/{project_id}/sync/all", response_model=FullSyncResponse)
 async def full_sync(
         project_id: str,
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    Perform full sync of all GitHub data.
-
-    Syncs:
-    - Collaborators (to team members)
-    - Issues
-    - Actions
-    - GitHub Projects
-    - Repository insights
-    """
-    logger.info(f"[GITHUB_DATA] POST /projects/{project_id}/sync/all")
+    """Perform full sync of all GitHub data."""
+    logger.info(f"[GITHUB_DATA] POST /{project_id}/sync/all")
 
     project = await get_project_with_access(project_id, current_user, db)
     github_token = get_github_token(current_user)
 
-    # Get team for collaborator sync
     team_service = TeamService(db)
 
     if project.team_id:
         team = await team_service.get_team(project.team_id)
     else:
-        # Use personal team
         team = await team_service.get_user_personal_team(str(current_user.id))
 
     if not team:
@@ -479,21 +426,16 @@ async def full_sync(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============== Wiki Endpoints (Placeholder) ==============
+# ============== Wiki Endpoints ==============
 
-@router.get("/projects/{project_id}/wiki")
+@router.get("/{project_id}/wiki")
 async def list_wiki_pages(
         project_id: str,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """
-    List cached wiki pages.
-
-    Note: GitHub API doesn't directly support wiki access.
-    This endpoint returns cached wiki pages if available.
-    """
-    logger.info(f"[GITHUB_DATA] GET /projects/{project_id}/wiki")
+    """List cached wiki pages."""
+    logger.info(f"[GITHUB_DATA] GET /{project_id}/wiki")
 
     await get_project_with_access(project_id, current_user, db)
 
@@ -501,7 +443,6 @@ async def list_wiki_pages(
     result = await db.execute(stmt)
     pages = result.scalars().all()
 
-    # If no pages, return info about wiki URL
     project = await get_project_with_access(project_id, current_user, db)
 
     return {

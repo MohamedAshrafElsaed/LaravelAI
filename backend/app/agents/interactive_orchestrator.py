@@ -6,6 +6,8 @@ experience with named agents, thinking animations, and plan approval gateway.
 
 Coordinates all agents with real-time visibility: analyze → retrieve → plan →
 (approval gateway) → execute → validate.
+
+UPDATED: Added step_code_chunk streaming for real-time code display.
 """
 import json
 import logging
@@ -106,6 +108,7 @@ class InteractiveOrchestrator:
     - Plan approval gateway with user modification support
     - Detailed event streaming for frontend visualization
     - Agent timeline tracking
+    - Real-time code streaming via step_code_chunk events
     """
 
     def __init__(
@@ -142,12 +145,12 @@ class InteractiveOrchestrator:
         self._plan_approval_event = asyncio.Event()
 
         # Initialize agents with the Claude service and config
-        claude = claude_service or get_claude_service()
-        self.intent_analyzer = IntentAnalyzer(claude)
+        self.claude = claude_service or get_claude_service()
+        self.intent_analyzer = IntentAnalyzer(self.claude)
         self.context_retriever = ContextRetriever(db, config=self.config)
-        self.planner = Planner(claude)
-        self.executor = Executor(claude, config=self.config)
-        self.validator = Validator(claude, config=self.config)
+        self.planner = Planner(self.claude)
+        self.executor = Executor(self.claude, config=self.config)
+        self.validator = Validator(self.claude, config=self.config)
 
         # Timeline tracker
         self.timeline = AgentTimelineTracker()
@@ -189,7 +192,6 @@ class InteractiveOrchestrator:
     async def _set_active_agent(self, agent: AgentIdentity) -> None:
         """Set the currently active agent and emit state change."""
         if self.active_agent and self.active_agent != agent:
-            # Deactivate previous agent
             await self._emit_event(agent_state_change(
                 self.active_agent.agent_type.value,
                 self.active_agent.name,
@@ -220,7 +222,6 @@ class InteractiveOrchestrator:
         if not messages:
             messages = agent.thinking_phrases
 
-        # Sample random messages
         selected = random.sample(messages, min(count, len(messages)))
 
         for i, thought in enumerate(selected):
@@ -255,7 +256,6 @@ class InteractiveOrchestrator:
             context,
         ))
 
-        # Also emit as agent message for conversation thread
         await self._emit_event(agent_message(
             from_agent.agent_type.value,
             from_agent.name,
@@ -267,7 +267,67 @@ class InteractiveOrchestrator:
 
         await self._set_active_agent(to_agent)
 
-    async def approve_plan(self, approved: bool = True, modified_plan: Optional[Dict] = None, rejection_reason: Optional[str] = None) -> None:
+    async def _stream_code_content(
+        self,
+        step_index: int,
+        file_path: str,
+        content: str,
+        action: str,
+        chunk_size: int = 150,
+        delay: float = 0.05,
+    ) -> None:
+        """
+        Stream code content in chunks for real-time display.
+
+        Args:
+            step_index: Index of the current step
+            file_path: Path of the file being generated
+            content: Full content to stream
+            action: Action type (create, modify, delete)
+            chunk_size: Size of each chunk in characters
+            delay: Delay between chunks in seconds
+        """
+        if not content:
+            return
+
+        total_length = len(content)
+        accumulated = ""
+
+        # Stream in chunks
+        for i in range(0, total_length, chunk_size):
+            chunk = content[i:i + chunk_size]
+            accumulated += chunk
+
+            await self._emit_event(step_code_chunk(
+                step_index=step_index,
+                file_path=file_path,
+                chunk=chunk,
+                accumulated_length=len(accumulated),
+                total_length=total_length,
+                done=False,
+                action=action,
+            ))
+
+            await asyncio.sleep(delay)
+
+        # Emit final done event with full content
+        await self._emit_event(step_code_chunk(
+            step_index=step_index,
+            file_path=file_path,
+            chunk="",
+            accumulated_length=total_length,
+            total_length=total_length,
+            done=True,
+            action=action,
+            content=content,
+        ))
+
+    async def approve_plan(
+        self,
+        approved: bool = True,
+        modified_plan: Optional[Dict] = None,
+        rejection_reason: Optional[str] = None
+    ) -> None:
         """
         Approve, modify, or reject the current plan.
 
@@ -279,7 +339,6 @@ class InteractiveOrchestrator:
 
         if modified_plan:
             self.plan_approval.modified = True
-            # Convert dict back to Plan object
             steps = [
                 PlanStep(
                     order=s.get("order", i + 1),
@@ -294,7 +353,6 @@ class InteractiveOrchestrator:
                 steps=steps,
             )
 
-        # Signal that plan decision has been made
         self._plan_approval_event.set()
 
     async def process_request(
@@ -351,8 +409,6 @@ class InteractiveOrchestrator:
             ))
 
             await self._emit_event(intent_started("Analyzing your request..."))
-
-            # Emit thinking sequence
             await self._emit_thinking_sequence(NOVA, "intent", count=3)
 
             event = await self._emit_legacy_event(
@@ -362,15 +418,12 @@ class InteractiveOrchestrator:
             )
             result.events.append(event)
 
-            # Actual intent analysis
             intent = await self.intent_analyzer.analyze(user_input, project_context)
             result.intent = intent
 
-            # Log intent
             if self.conversation_logger:
                 self.conversation_logger.log_intent_analysis(intent.to_dict())
 
-            # Emit analyzed result
             await self._emit_event(intent_analyzed(
                 intent.to_dict(),
                 f"Identified: {intent.task_type} affecting {', '.join(intent.domains_affected[:3])}",
@@ -403,8 +456,6 @@ class InteractiveOrchestrator:
             ))
 
             await self._emit_event(context_started("Searching the codebase..."))
-
-            # Emit thinking sequence
             await self._emit_thinking_sequence(SCOUT, "context", count=4)
 
             event = await self._emit_legacy_event(
@@ -414,7 +465,6 @@ class InteractiveOrchestrator:
             )
             result.events.append(event)
 
-            # Actual context retrieval
             try:
                 context = await self.context_retriever.retrieve(
                     project_id, intent,
@@ -435,7 +485,6 @@ class InteractiveOrchestrator:
                 await self._emit_event(error(result.error))
                 return result
 
-            # Emit found chunks (show a few key ones)
             for i, chunk in enumerate(context.chunks[:3]):
                 await self._emit_event(context_chunk_found(
                     chunk.file_path,
@@ -445,7 +494,6 @@ class InteractiveOrchestrator:
                 ))
                 await asyncio.sleep(0.2)
 
-            # Log context retrieval
             if self.conversation_logger:
                 chunks_data = [
                     {
@@ -493,10 +541,7 @@ class InteractiveOrchestrator:
                 )
                 result.events.append(event)
                 result.success = True
-
-                # Complete timeline
                 self.timeline.complete_current()
-
                 return result
 
             # ============== PHASE 3: BLUEPRINT - PLANNING ==============
@@ -513,8 +558,6 @@ class InteractiveOrchestrator:
             ))
 
             await self._emit_event(planning_started("Creating implementation plan..."))
-
-            # Emit thinking sequence
             await self._emit_thinking_sequence(BLUEPRINT, "planning", count=4)
 
             event = await self._emit_legacy_event(
@@ -524,7 +567,6 @@ class InteractiveOrchestrator:
             )
             result.events.append(event)
 
-            # Actual planning
             plan = await self.planner.plan(user_input, intent, context, project_context)
             result.plan = plan
 
@@ -537,7 +579,6 @@ class InteractiveOrchestrator:
                 ))
                 await asyncio.sleep(0.3)
 
-            # Log plan
             if self.conversation_logger:
                 self.conversation_logger.log_plan(plan.to_dict())
 
@@ -569,18 +610,16 @@ class InteractiveOrchestrator:
                     True,
                 ))
 
-                # Wait for user approval (with timeout)
                 try:
                     await asyncio.wait_for(
                         self._plan_approval_event.wait(),
-                        timeout=300.0,  # 5 minute timeout
+                        timeout=300.0,
                     )
                 except asyncio.TimeoutError:
                     result.error = "Plan approval timed out"
                     await self._emit_event(error("Plan approval timed out"))
                     return result
 
-                # Handle rejection
                 if self.plan_approval.rejected:
                     await self._emit_event(agent_message(
                         BLUEPRINT.agent_type.value,
@@ -588,11 +627,9 @@ class InteractiveOrchestrator:
                         f"Plan rejected: {self.plan_approval.rejection_reason}. Let me try again...",
                         "error",
                     ))
-                    # Could implement regeneration here
                     result.error = f"Plan rejected: {self.plan_approval.rejection_reason}"
                     return result
 
-                # Handle modification
                 if self.plan_approval.modified and self.plan_approval.plan:
                     plan = self.plan_approval.plan
                     result.plan = plan
@@ -605,7 +642,6 @@ class InteractiveOrchestrator:
 
                 await self._emit_event(plan_approved(plan.to_dict()))
             else:
-                # Auto-approve
                 await self._emit_event(plan_created(plan.to_dict(), "Plan created", 0.4))
 
             # ============== PHASE 4: FORGE - EXECUTION ==============
@@ -629,7 +665,6 @@ class InteractiveOrchestrator:
                 step_progress_start = 0.4 + (0.4 * (i / total_steps))
                 step_progress_end = 0.4 + (0.4 * ((i + 1) / total_steps))
 
-                # Determine action type for thinking messages
                 action_type = step.action
                 if "route" in step.file.lower():
                     action_type = "route"
@@ -661,12 +696,12 @@ class InteractiveOrchestrator:
                 )
                 result.events.append(event)
 
-                # Emit thinking sequence for this step
+                # Emit thinking sequence
                 await self._emit_thinking_sequence(
                     FORGE,
                     action_type,
-                    count=4,
-                    delay=0.6,
+                    count=2,
+                    delay=0.4,
                     file_path=step.file,
                     step_index=i,
                 )
@@ -685,9 +720,19 @@ class InteractiveOrchestrator:
                     project_context=project_context,
                 )
 
+                # Stream the generated code content
+                if exec_result.success and exec_result.content:
+                    await self._stream_code_content(
+                        step_index=i,
+                        file_path=step.file,
+                        content=exec_result.content,
+                        action=step.action,
+                        chunk_size=200,
+                        delay=0.03,
+                    )
+
                 execution_results.append(exec_result)
 
-                # Log execution
                 if self.conversation_logger:
                     self.conversation_logger.log_execution_step(
                         step_number=i + 1,
@@ -758,8 +803,6 @@ class InteractiveOrchestrator:
             ))
 
             await self._emit_event(validation_started("Validating generated code..."))
-
-            # Emit thinking sequence
             await self._emit_thinking_sequence(GUARDIAN, "validation", count=4)
 
             event = await self._emit_legacy_event(
@@ -769,7 +812,6 @@ class InteractiveOrchestrator:
             )
             result.events.append(event)
 
-            # Actual validation
             validation = await self.validator.validate(
                 user_input=user_input,
                 intent=intent,
@@ -778,18 +820,16 @@ class InteractiveOrchestrator:
             )
             result.validation = validation
 
-            # Emit found issues one by one
             for issue in validation.issues:
                 await self._emit_event(validation_issue_found(
                     issue.severity,
                     issue.file,
                     issue.message,
                     issue.line,
-                    None,  # suggestion
+                    None,
                 ))
                 await asyncio.sleep(0.2)
 
-            # Log validation
             if self.conversation_logger:
                 self.conversation_logger.log_validation(validation.to_dict())
 
@@ -797,14 +837,11 @@ class InteractiveOrchestrator:
             initial_score = validation.score
             previous_score = initial_score
             retry_count = 0
-
-            # Detect critical failure (e.g., file deleted entirely)
             is_critical_failure = initial_score <= self.config.CRITICAL_FAILURE_THRESHOLD
 
             while not validation.approved and retry_count < self.config.MAX_FIX_ATTEMPTS:
                 retry_count += 1
 
-                # Circuit breaker - but allow at least one fix attempt for critical failures
                 if self.config.ABORT_ON_SCORE_DEGRADATION and retry_count > 1:
                     if validation.score < previous_score - self.config.SCORE_DEGRADATION_THRESHOLD:
                         await self._emit_event(agent_message(
@@ -815,8 +852,6 @@ class InteractiveOrchestrator:
                         ))
                         break
 
-                    # Only apply MIN_VALIDATION_SCORE check after first attempt
-                    # This ensures we always try at least once to fix, even critical failures
                     if validation.score < self.config.MIN_VALIDATION_SCORE and not is_critical_failure:
                         await self._emit_event(agent_message(
                             GUARDIAN.agent_type.value,
@@ -826,7 +861,6 @@ class InteractiveOrchestrator:
                         ))
                         break
 
-                # For critical failures on first attempt, emit a recovery message
                 if is_critical_failure and retry_count == 1:
                     await self._emit_event(agent_message(
                         GUARDIAN.agent_type.value,
@@ -837,13 +871,11 @@ class InteractiveOrchestrator:
 
                 previous_score = validation.score
 
-                # Emit fix started
                 await self._emit_event(validation_fix_started(
                     len(validation.errors),
                     f"Starting fix attempt {retry_count}/{self.config.MAX_FIX_ATTEMPTS}...",
                 ))
 
-                # Handoff to Forge for fixes
                 await self._handoff(GUARDIAN, FORGE, {
                     "issues": [i.to_dict() for i in validation.errors],
                     "fix_attempt": retry_count,
@@ -864,7 +896,6 @@ class InteractiveOrchestrator:
                 )
                 result.events.append(event)
 
-                # Fix logic (same as original orchestrator)
                 all_issues = [i.message for i in validation.errors]
 
                 def normalize_path(path: str) -> str:
@@ -914,7 +945,6 @@ class InteractiveOrchestrator:
                         file_issues = all_issues
 
                     if file_issues:
-                        # Detect if file was completely deleted (critical failure)
                         file_was_deleted = (
                             is_critical_failure
                             and self.config.REGENERATE_ON_DELETION
@@ -923,7 +953,6 @@ class InteractiveOrchestrator:
                         )
 
                         if file_was_deleted:
-                            # File was deleted - need to regenerate entirely
                             await self._emit_event(agent_message(
                                 FORGE.agent_type.value,
                                 FORGE.name,
@@ -931,7 +960,6 @@ class InteractiveOrchestrator:
                                 "warning",
                             ))
 
-                            # Emit thinking for regeneration
                             await self._emit_thinking_sequence(
                                 FORGE,
                                 "create",
@@ -940,7 +968,6 @@ class InteractiveOrchestrator:
                                 file_path=exec_result.file,
                             )
 
-                            # Regenerate the file using the executor with original intent
                             regeneration_issues = file_issues + [
                                 "CRITICAL: The previous attempt deleted the entire file instead of modifying it.",
                                 "You MUST preserve all existing functionality while making the requested changes.",
@@ -953,7 +980,6 @@ class InteractiveOrchestrator:
                                 context=context,
                             )
                         else:
-                            # Normal fix attempt
                             await self._emit_thinking_sequence(
                                 FORGE,
                                 "modify",
@@ -967,11 +993,22 @@ class InteractiveOrchestrator:
                                 issues=file_issues,
                                 context=context,
                             )
+
+                        # Stream the fixed code
+                        if fixed.success and fixed.content:
+                            await self._stream_code_content(
+                                step_index=idx,
+                                file_path=fixed.file,
+                                content=fixed.content,
+                                action="modify",
+                                chunk_size=200,
+                                delay=0.03,
+                            )
+
                         execution_results[idx] = fixed
 
                 result.execution_results = execution_results
 
-                # Log fix attempt
                 if self.conversation_logger:
                     fixed_files = [execution_results[idx].file for idx in files_to_fix if execution_results[idx].success]
                     self.conversation_logger.log_fix_attempt(
@@ -986,7 +1023,6 @@ class InteractiveOrchestrator:
                     len(validation.errors),
                 ))
 
-                # Handoff back to Guardian for re-validation
                 await self._handoff(FORGE, GUARDIAN, {"fixed_files": len(files_to_fix)})
 
                 await self._emit_event(agent_message(
@@ -996,7 +1032,6 @@ class InteractiveOrchestrator:
                     "custom",
                 ))
 
-                # Re-validate
                 validation = await self.validator.validate(
                     user_input=user_input,
                     intent=intent,
@@ -1005,7 +1040,6 @@ class InteractiveOrchestrator:
                 )
                 result.validation = validation
 
-                # Log re-validation
                 if self.conversation_logger:
                     self.conversation_logger.log_validation(validation.to_dict())
 
@@ -1110,10 +1144,7 @@ class InteractiveOrchestrator:
 
     def build_project_context(self, project: Project) -> str:
         """Build rich project context from scan data."""
-        # Use the same implementation from the base Orchestrator
         from app.agents.orchestrator import Orchestrator
-
-        # Create a temporary orchestrator just to use the method
         temp = Orchestrator.__new__(Orchestrator)
         return Orchestrator.build_project_context(temp, project)
 
