@@ -1,15 +1,15 @@
 'use client';
 
-import {forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState} from 'react';
-import {Check, FileCode, Loader2, Send} from 'lucide-react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Check, FileCode, Loader2, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {Button} from '@/components/ui/Button';
-import {chatApi, getErrorMessage} from '@/lib/api';
-import {useToast} from '@/components/Toast';
-import {AgentConversation, PlanEditor, useAgentConversation, ValidationResultDisplay,} from './index';
-import {AgentInfo, AgentTimeline, DEFAULT_AGENTS, InteractiveEvent, Plan, ValidationResult,} from './types';
-import {ConversationEntry, eventsToConversationEntries} from './AgentConversation';
+import { Button } from '@/components/ui/Button';
+import { chatApi, getErrorMessage } from '@/lib/api';
+import { useToast } from '@/components/Toast';
+import { AgentConversation, PlanEditor, useAgentConversation, ValidationResultDisplay, } from './index';
+import { AgentInfo, AgentTimeline, DEFAULT_AGENTS, InteractiveEvent, Plan, ValidationResult, } from './types';
+import { ConversationEntry, eventsToConversationEntries } from './AgentConversation';
 
 interface ExecutionResult {
     action: string;
@@ -51,13 +51,13 @@ export interface InteractiveChatRef {
 }
 
 // Files Changed Display Component
-function FilesChanged({results}: { results: ExecutionResult[] }) {
+function FilesChanged({ results }: { results: ExecutionResult[] }) {
     if (!results || results.length === 0) return null;
 
     return (
         <div className="mt-3 pt-3 border-t border-gray-700">
             <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-                <FileCode className="h-4 w-4"/>
+                <FileCode className="h-4 w-4" />
                 <span>Files Changed ({results.length})</span>
             </div>
             <div className="font-mono text-xs space-y-1">
@@ -70,7 +70,7 @@ function FilesChanged({results}: { results: ExecutionResult[] }) {
                     return (
                         <div key={index} className="flex items-center gap-2">
                             {result.success ? (
-                                <Check className="h-3 w-3 text-green-400"/>
+                                <Check className="h-3 w-3 text-green-400" />
                             ) : (
                                 <span className="text-red-400">✗</span>
                             )}
@@ -85,23 +85,23 @@ function FilesChanged({results}: { results: ExecutionResult[] }) {
 }
 
 // Stored Activity Display - for displaying persisted conversation entries
-function StoredActivityDisplay({entries}: { entries: ConversationEntry[] }) {
+function StoredActivityDisplay({ entries }: { entries: ConversationEntry[] }) {
     if (!entries || entries.length === 0) return null;
 
     return (
-        <div className="bg-gray-950 rounded-lg p-4 border border-gray-800 mb-4">
-            <AgentConversation entries={entries} autoScroll={false}/>
+        <div className="bg-[var(--color-bg-elevated)]/30 backdrop-blur-sm rounded-lg p-4 border border-[var(--color-border-subtle)] mb-4">
+            <AgentConversation entries={entries} autoScroll={false} />
         </div>
     );
 }
 
 export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatProps>(function InteractiveChat({
-                                                                                                                 projectId,
-                                                                                                                 conversationId: initialConversationId,
-                                                                                                                 onConversationChange,
-                                                                                                                 requirePlanApproval = true,
-                                                                                                                 className = '',
-                                                                                                             }, ref) {
+    projectId,
+    conversationId: initialConversationId,
+    onConversationChange,
+    requirePlanApproval = true,
+    className = '',
+}, ref) {
     const toast = useToast();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -149,7 +149,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
 
     // Auto-scroll
     const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, []);
 
     useEffect(() => {
@@ -275,7 +275,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
 
     // Handle SSE events
     const handleEvent = useCallback((event: InteractiveEvent) => {
-        const {event: eventType, data} = event;
+        const { event: eventType, data } = event;
 
         // Process event in agent conversation
         processEvent(event);
@@ -381,7 +381,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
             } else if (line.startsWith('data:') && currentEvent) {
                 try {
                     const data = JSON.parse(line.substring(5).trim());
-                    events.push({event: currentEvent as any, data});
+                    events.push({ event: currentEvent as any, data });
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
@@ -443,10 +443,10 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
             let buffer = '';
 
             while (true) {
-                const {done, value} = await reader.read();
+                const { done, value } = await reader.read();
                 if (done) break;
 
-                buffer += decoder.decode(value, {stream: true});
+                buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n\n');
                 buffer = lines.pop() || '';
 
@@ -532,13 +532,13 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
     }, [sendMessage]);
 
     return (
-        <div className={`flex flex-col h-full bg-gray-900 ${className}`}>
+        <div className={`flex flex-col h-full ${className}`}>
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {/* Loading messages indicator */}
                 {isLoadingMessages && (
                     <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-gray-500"/>
+                        <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
                         <span className="ml-2 text-gray-500">Loading messages...</span>
                     </div>
                 )}
@@ -549,7 +549,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
                         {/* User message */}
                         {message.role === 'user' && (
                             <div className="flex justify-end animate-slideIn">
-                                <div className="max-w-[80%] rounded-lg px-4 py-2 bg-blue-600 text-white">
+                                <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-[var(--color-primary)] text-white shadow-md">
                                     <div className="prose prose-invert prose-sm max-w-none">
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                             {message.content}
@@ -564,12 +564,12 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
                             <div className="space-y-2">
                                 {/* Show stored agent activity if available */}
                                 {message.processingData?.agent_activity && message.processingData.agent_activity.length > 0 && (
-                                    <StoredActivityDisplay entries={message.processingData.agent_activity}/>
+                                    <StoredActivityDisplay entries={message.processingData.agent_activity} />
                                 )}
 
                                 {/* Message content */}
                                 <div className="flex justify-start animate-slideIn">
-                                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-gray-800 text-gray-100">
+                                    <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] border border-[var(--color-border-subtle)] shadow-sm">
                                         <div className="prose prose-invert prose-sm max-w-none">
                                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                                 {message.content}
@@ -578,7 +578,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
 
                                         {/* Files changed */}
                                         {message.processingData?.execution_results && (
-                                            <FilesChanged results={message.processingData.execution_results}/>
+                                            <FilesChanged results={message.processingData.execution_results} />
                                         )}
 
                                         {/* Validation result */}
@@ -606,7 +606,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {streamingContent}
                                 </ReactMarkdown>
-                                <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"/>
+                                <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1" />
                             </div>
                         </div>
                     </div>
@@ -614,7 +614,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
 
                 {/* Agent Activity - CLI Style (current processing) */}
                 {(isLoading || conversationEntries.length > 0) && !isLoadingMessages && (
-                    <div className="bg-gray-950 rounded-lg p-4 border border-gray-800">
+                    <div className="bg-[var(--color-bg-elevated)]/30 backdrop-blur-sm rounded-lg p-4 border border-[var(--color-border-subtle)]">
                         <AgentConversation
                             entries={conversationEntries}
                             currentThinking={currentThinking}
@@ -643,31 +643,31 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
                 )}
 
                 {/* Scroll anchor */}
-                <div ref={messagesEndRef}/>
+                <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
             <div className="border-t border-gray-700 p-4">
                 <div className="flex gap-2">
-          <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder="Type your message..."
-              disabled={isLoading || awaitingPlanApproval}
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={1}
-          />
+                    <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyPress}
+                        placeholder="Type your message..."
+                        disabled={isLoading || awaitingPlanApproval}
+                        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        rows={1}
+                    />
                     <Button
                         onClick={sendMessage}
                         disabled={!input.trim() || isLoading || awaitingPlanApproval}
                         className="px-4"
                     >
                         {isLoading ? (
-                            <Loader2 className="h-5 w-5 animate-spin"/>
+                            <Loader2 className="h-5 w-5 animate-spin" />
                         ) : (
-                            <Send className="h-5 w-5"/>
+                            <Send className="h-5 w-5" />
                         )}
                     </Button>
                 </div>
@@ -675,7 +675,7 @@ export const InteractiveChat = forwardRef<InteractiveChatRef, InteractiveChatPro
                 {/* Status indicator */}
                 {isLoading && !awaitingPlanApproval && (
                     <div className="mt-2 text-xs text-gray-500 flex items-center gap-2">
-                        <Loader2 className="h-3 w-3 animate-spin"/>
+                        <Loader2 className="h-3 w-3 animate-spin" />
                         Processing with AI agents...
                     </div>
                 )}

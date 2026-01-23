@@ -784,24 +784,24 @@ export const chatApi = {
 };
 
 // --- Git API ---
-export const gitApi = {
+export const gitApi =  {
     listBranches: (projectId: string) =>
-        api.get<GitBranch[]>(`/projects/${projectId}/git/branches`),
+        api.get<GitBranch[]>(`/projects/${projectId}/branches`),
 
     applyChanges: (projectId: string, data: ApplyChangesRequest) =>
-        api.post<ApplyChangesResponse>(`/projects/${projectId}/git/apply`, data),
+        api.post<ApplyChangesResponse>(`/projects/${projectId}/apply`, data),
 
     createPR: (projectId: string, data: CreatePRRequest) =>
-        api.post<PRResponse>(`/projects/${projectId}/git/pr`, data),
+        api.post<PRResponse>(`/projects/${projectId}/pr`, data),
 
     sync: (projectId: string) =>
-        api.post<SyncResponse>(`/projects/${projectId}/git/sync`),
+        api.post<SyncResponse>(`/projects/${projectId}/sync`),
 
     reset: (projectId: string, branch?: string) =>
-        api.post(`/projects/${projectId}/git/reset`, null, {params: {branch}}),
+        api.post(`/projects/${projectId}/reset`, null, {params: {branch}}),
 
     getDiff: (projectId: string, baseBranch?: string) =>
-        api.get(`/projects/${projectId}/git/diff`, {params: {base_branch: baseBranch}}),
+        api.get(`/projects/${projectId}/diff`, {params: {base_branch: baseBranch}}),
 };
 
 // --- Git Changes API ---
@@ -828,7 +828,7 @@ export const gitChangesApi = {
         api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/push`),
 
     createPRForChange: (projectId: string, changeId: string, params?: { title?: string; description?: string }) =>
-        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/pr`, null, {params}),
+        api.post<GitChange>(`/projects/${projectId}/changes/${changeId}/create-pr`, null, {params}),
 
     rollbackChange: (projectId: string, changeId: string, force?: boolean) =>
         api.post<RollbackResponse>(`/projects/${projectId}/changes/${changeId}/rollback`, {force}),

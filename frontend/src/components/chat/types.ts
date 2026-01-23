@@ -17,7 +17,7 @@ export interface AgentInfo {
 // ============== CONVERSATION TYPES ==============
 export interface ConversationEntry {
     id: string;
-    type: 'message' | 'handoff' | 'step' | 'system';
+    type: 'message' | 'handoff' | 'step' | 'system' | 'plan_step' | 'file_artifact';
     timestamp: string;
     agentType?: AgentType;
     toAgentType?: AgentType;
@@ -27,6 +27,11 @@ export interface ConversationEntry {
     filePath?: string;
     completed?: boolean;
     systemType?: 'info' | 'success' | 'warning' | 'error';
+    // Plan step data
+    stepData?: PlanStep;
+    // File artifact data
+    fileContent?: string;
+    isStreaming?: boolean;
 }
 
 export interface AgentThinkingState {
@@ -123,17 +128,29 @@ export interface AgentTimeline {
     timeline: AgentActivity[];
 }
 
+// ============== STREAMING FILE TYPES ==============
+export interface StreamingFile {
+    stepIndex: number;
+    file: string;
+    content: string;
+    totalLength: number;
+    done: boolean;
+    action: string;
+}
+
 // ============== SSE EVENT TYPES ==============
 export type SSEEventType =
     | 'connected'
     | 'agent_message'
     | 'agent_handoff'
     | 'agent_thinking'
+    | 'agent_state_change'
     | 'intent_started'
     | 'intent_thinking'
     | 'intent_analyzed'
     | 'context_started'
     | 'context_thinking'
+    | 'context_chunk_found'
     | 'context_retrieved'
     | 'planning_started'
     | 'planning_thinking'
@@ -144,12 +161,15 @@ export type SSEEventType =
     | 'execution_started'
     | 'step_started'
     | 'step_thinking'
+    | 'step_code_chunk'
+    | 'step_progress'
     | 'step_completed'
     | 'execution_completed'
     | 'validation_started'
     | 'validation_thinking'
     | 'validation_issue_found'
     | 'validation_fix_started'
+    | 'validation_fix_completed'
     | 'validation_result'
     | 'answer_chunk'
     | 'complete'
@@ -218,6 +238,16 @@ export interface ConversationMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
+    code_changes?: Record<string, unknown>;
+    processing_data?: {
+        intent?: unknown;
+        plan?: unknown;
+        execution_results?: unknown[];
+        validation?: unknown;
+        events?: unknown[];
+        success?: boolean;
+        error?: string;
+        agent_timeline?: unknown;
+    };
     created_at: string;
-    processing_data?: any;
 }

@@ -315,10 +315,13 @@ export default function DashboardChatPage() {
                     ) : (
                         <div className="space-y-1">
                             {filteredConversations.map((conv) => (
-                                <button
+                                <div
                                     key={conv.id}
                                     onClick={() => selectConversation(conv.id)}
-                                    className={`w-full flex items-start gap-3 p-3 rounded-lg text-left transition-colors group ${
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => e.key === 'Enter' && selectConversation(conv.id)}
+                                    className={`w-full flex items-start gap-3 p-3 rounded-lg text-left transition-colors group cursor-pointer ${
                                         currentConversationId === conv.id
                                             ? 'bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30'
                                             : 'hover:bg-[var(--color-bg-hover)] border border-transparent'
@@ -331,23 +334,23 @@ export default function DashboardChatPage() {
                                     }`}/>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between gap-2">
-                      <span className={`text-sm font-medium truncate ${
-                          currentConversationId === conv.id
-                              ? 'text-[var(--color-primary)]'
-                              : 'text-[var(--color-text-primary)]'
-                      }`}>
-                        {conv.title || 'New conversation'}
-                      </span>
+                <span className={`text-sm font-medium truncate ${
+                    currentConversationId === conv.id
+                        ? 'text-[var(--color-primary)]'
+                        : 'text-[var(--color-text-primary)]'
+                }`}>
+                    {conv.title || 'New conversation'}
+                </span>
                                             <span className="text-xs text-[var(--color-text-muted)] flex-shrink-0">
-                        {formatTime(conv.updated_at)}
-                      </span>
+                    {formatTime(conv.updated_at)}
+                </span>
                                         </div>
                                         <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
                                             {conv.last_message || 'No messages'}
                                         </p>
                                         <span className="text-[10px] text-[var(--color-text-dimmer)]">
-                      {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
-                    </span>
+                {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
+            </span>
                                     </div>
                                     <button
                                         onClick={(e) => handleDeleteConversation(conv.id, e)}
@@ -360,7 +363,7 @@ export default function DashboardChatPage() {
                                             <Trash2 className="h-4 w-4"/>
                                         )}
                                     </button>
-                                </button>
+                                </div>
                             ))}
                         </div>
                     )}
