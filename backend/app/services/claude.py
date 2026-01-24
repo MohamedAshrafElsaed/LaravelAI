@@ -33,8 +33,9 @@ def _get_ops_logger():
 
 class ClaudeModel(str, Enum):
     """Available Claude models."""
-    HAIKU = "claude-haiku-4-5-20251001"
+    OPUS = "claude-opus-4-5-20251101"
     SONNET = "claude-sonnet-4-5-20250929"
+    HAIKU = "claude-haiku-4-5-20251001"
 
 
 class ClaudeService:

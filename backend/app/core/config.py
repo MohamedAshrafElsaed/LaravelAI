@@ -15,6 +15,8 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    nova_model: str = "opus"
+
     # App
     app_name: str = "Laravel AI"
     app_env: str = "development"

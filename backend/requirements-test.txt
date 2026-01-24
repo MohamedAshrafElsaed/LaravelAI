@@ -1,0 +1,19 @@
+# Testing dependencies for Nova (Intent Analyzer) Agent
+# Install with: pip install -r requirements-test.txt
+
+# Core testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.5.0  # Parallel test execution
+
+# Mocking
+pytest-mock>=3.12.0
+
+# Test utilities
+hypothesis>=6.100.0  # Property-based testing (optional)
+faker>=24.0.0  # Fake data generation (optional)
+
+# Code quality
+ruff>=0.3.0  # Linting
+mypy>=1.9.0  # Type checking

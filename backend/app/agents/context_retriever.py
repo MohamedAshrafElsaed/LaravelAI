@@ -4,7 +4,8 @@ Context Retriever Agent.
 Retrieves relevant code context from the vector database based on intent.
 Expands related files and manages token budget.
 
-UPDATED: Includes safety checks and better error handling.
+UPDATED: Removed fallback context injection per no-guessing policy.
+         Insufficient results -> insufficient confidence (no filler files).
 """
 import logging
 from typing import Optional, List
@@ -150,7 +151,7 @@ class ContextRetriever:
     Uses vector search to find relevant code chunks, then expands
     to include related files based on Laravel conventions.
 
-    UPDATED: Includes safety checks and better error handling.
+    UPDATED: Removed fallback context injection (no-guessing policy).
     """
 
     def __init__(
@@ -173,7 +174,7 @@ class ContextRetriever:
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.config = config or agent_config
-        logger.info("[CONTEXT_RETRIEVER] Initialized with safety checks enabled")
+        logger.info("[CONTEXT_RETRIEVER] Initialized with no-guessing policy")
 
     async def _ensure_services(self, project_id: str) -> None:
         """Ensure vector store and embedding services are initialized."""
@@ -198,7 +199,8 @@ class ContextRetriever:
         """
         Retrieve relevant context based on intent.
 
-        UPDATED: Includes multiple retry strategies and minimum context validation.
+        UPDATED: No fallback context injection. If retrieval is insufficient,
+        returns confidence_level="insufficient" or raises InsufficientContextError.
 
         Args:
             project_id: The project UUID
@@ -238,17 +240,15 @@ class ContextRetriever:
             context.retrieval_metadata["strategies_used"].append("vector_search_low_threshold")
 
         # Strategy 3: Expand related files based on Laravel conventions
+        # (Only expands from FOUND files, does not inject unrelated files)
         if context.chunks:
             seen_files = {c.file_path for c in context.chunks}
             related = await self._expand_related_files(project_id, list(seen_files))
             await self._add_related_files(project_id, related, context, token_budget)
             context.retrieval_metadata["strategies_used"].append("laravel_conventions")
 
-        # Strategy 4: Fallback to basic project files
-        if len(context.chunks) < self.config.MIN_CONTEXT_CHUNKS:
-            logger.warning("[CONTEXT_RETRIEVER] Using fallback strategy")
-            await self._add_fallback_context(project_id, context, token_budget)
-            context.retrieval_metadata["strategies_used"].append("fallback")
+        # NO FALLBACK STRATEGY - removed per no-guessing policy
+        # If we have insufficient results, we report that honestly
 
         # Add domain summaries
         context.domain_summaries = await self._get_domain_summaries(
@@ -318,6 +318,9 @@ class ContextRetriever:
 
                 logger.info(f"[CONTEXT_RETRIEVER] Query '{query}' returned {len(results)} results")
 
+                if not results:
+                    logger.info(f"[CONTEXT_RETRIEVER] No results above threshold={threshold} for query '{query}'")
+
                 for result in results:
                     # Handle SearchResult objects (convert to dict if needed)
                     if hasattr(result, 'to_dict'):
@@ -369,7 +372,7 @@ class ContextRetriever:
         context: RetrievedContext,
         token_budget: int,
     ) -> None:
-        """Add related files to context."""
+        """Add related files to context (only files that exist in index)."""
         used_tokens = sum(c.estimated_tokens for c in context.chunks)
         seen_files = {c.file_path for c in context.chunks}
 
@@ -393,46 +396,9 @@ class ContextRetriever:
                     seen_files.add(file_path)
                     used_tokens += chunk.estimated_tokens
 
-    async def _add_fallback_context(
-        self,
-        project_id: str,
-        context: RetrievedContext,
-        token_budget: int,
-    ) -> None:
-        """Add fallback context when vector search returns nothing."""
-        # Try to get some basic files from the database
-        fallback_files = [
-            "routes/api.php",
-            "routes/web.php",
-            "app/Models/User.php",
-            "app/Http/Controllers/Controller.php",
-            "config/app.php",
-            "composer.json",
-        ]
-
-        used_tokens = sum(c.estimated_tokens for c in context.chunks)
-        max_fallback_tokens = token_budget // 4  # Use max 25% of budget for fallback
-
-        for file_path in fallback_files:
-            if used_tokens >= max_fallback_tokens:
-                break
-
-            try:
-                content = await self._get_file_content(project_id, file_path)
-                if content:
-                    chunk = CodeChunk(
-                        file_path=file_path,
-                        content=content[:3000],  # Truncate long files
-                        chunk_type="fallback",
-                        start_line=1,
-                        end_line=content.count("\n") + 1,
-                        score=0.3,
-                    )
-                    context.chunks.append(chunk)
-                    used_tokens += chunk.estimated_tokens
-                    logger.info(f"[CONTEXT_RETRIEVER] Added fallback file: {file_path}")
-            except Exception as e:
-                logger.debug(f"[CONTEXT_RETRIEVER] Fallback file not found: {file_path}")
+    # REMOVED: _add_fallback_context() method
+    # Per no-guessing policy, we do not inject unrelated "basic project files"
+    # when retrieval yields insufficient results.
 
     async def _expand_related_files(
         self,
@@ -441,6 +407,7 @@ class ContextRetriever:
     ) -> List[str]:
         """
         Find related files based on Laravel conventions.
+        Only suggests files related to ALREADY FOUND files.
 
         Args:
             project_id: The project UUID

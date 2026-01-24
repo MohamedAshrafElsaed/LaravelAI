@@ -1,0 +1,1235 @@
+{
+  "timestamp": "2026-01-23T23:08:19.592605+00:00",
+  "summary": {
+    "passed": 22,
+    "failed": 1,
+    "total": 23
+  },
+  "results": [
+    {
+      "scenario": "feature_simple",
+      "input": "Add a user profile page",
+      "expected": {
+        "task_type": "feature",
+        "priority": "medium",
+        "needs_clarification": false,
+        "domains_should_contain": [
+          "controllers",
+          "views"
+        ]
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.9,
+        "domains_affected": [
+          "controllers",
+          "views",
+          "routing",
+          "models"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php",
+          "blade"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User",
+            "UserController"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "UserController",
+          "User model",
+          "profile",
+          "user show",
+          "Route::get profile",
+          "auth user"
+        ],
+        "reasoning": "User wants to add a profile page feature. Project has User model and UserController confirmed. Standard feature work requiring controller method, route, and view.",
+        "overall_confidence": 0.75,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "What information should be displayed on the profile page? (a) Basic info only (name, email) (b) Full profile with orders/activity (c) Editable profile form",
+          "Should this be a web page (Blade view) or an API endpoint?"
+        ],
+        "analysis_time_ms": 6249,
+        "retry_count": 0
+      },
+      "passed": false,
+      "errors": [
+        "needs_clarification: expected False, got True"
+      ],
+      "elapsed_ms": 6249
+    },
+    {
+      "scenario": "feature_with_entities",
+      "input": "Add an export method to the OrderController that generates PDF reports",
+      "expected": {
+        "task_type": "feature",
+        "priority": "medium",
+        "needs_clarification": false,
+        "entities_should_contain": {
+          "classes": [
+            "OrderController"
+          ],
+          "methods": [
+            "export"
+          ]
+        }
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "services",
+          "routing"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "OrderController",
+            "Order"
+          ],
+          "methods": [
+            "export"
+          ],
+          "routes": [],
+          "tables": [
+            "orders"
+          ]
+        },
+        "search_queries": [
+          "OrderController",
+          "Order model",
+          "PDF export",
+          "barryvdh/laravel-dompdf",
+          "report generation"
+        ],
+        "reasoning": "User explicitly requests adding an export method to OrderController for PDF reports. OrderController confirmed in project context. Standard feature work with clear scope.",
+        "overall_confidence": 0.9,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4300,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4300
+    },
+    {
+      "scenario": "feature_database",
+      "input": "Add a new 'notes' field to the users table",
+      "expected": {
+        "task_type": "feature",
+        "requires_migration": true,
+        "domains_should_contain": [
+          "database",
+          "models"
+        ]
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "database",
+          "models"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": true,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "User model",
+          "users table",
+          "migration add column",
+          "fillable",
+          "create_users_table"
+        ],
+        "reasoning": "User wants to add a 'notes' column to the users table. This requires a new migration and updating the User model's fillable array. Straightforward schema change.",
+        "overall_confidence": 0.95,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4520,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4520
+    },
+    {
+      "scenario": "feature_api",
+      "input": "Create a REST API endpoint for /api/products with full CRUD operations",
+      "expected": {
+        "task_type": "feature",
+        "domains_should_contain": [
+          "api",
+          "controllers",
+          "routing"
+        ],
+        "entities_should_contain": {
+          "routes": [
+            "/api/products"
+          ]
+        }
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "api",
+          "controllers",
+          "routing",
+          "validation",
+          "models"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Product",
+            "ProductController"
+          ],
+          "methods": [
+            "index",
+            "store",
+            "show",
+            "update",
+            "destroy"
+          ],
+          "routes": [
+            "/api/products"
+          ],
+          "tables": [
+            "products"
+          ]
+        },
+        "search_queries": [
+          "Api/V1/ProductController",
+          "ProductController",
+          "Product model",
+          "api.php routes",
+          "ProductRequest",
+          "ProductResource"
+        ],
+        "reasoning": "User wants a full CRUD REST API for products. Product model exists in project. Project already has Api/V1 namespace pattern (OrderController). Standard resource controller implementation with validation and API resources.",
+        "overall_confidence": 0.9,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 6015,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 6015
+    },
+    {
+      "scenario": "bugfix_auth",
+      "input": "The login form shows 'invalid credentials' even when I enter the correct password",
+      "expected": {
+        "task_type": "bugfix",
+        "priority": "high",
+        "needs_clarification": false,
+        "domains_should_contain": [
+          "auth"
+        ]
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "auth",
+          "controllers",
+          "validation"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "high",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "LoginController",
+          "AuthenticatesUsers",
+          "Auth::attempt",
+          "credentials",
+          "sanctum",
+          "password hash"
+        ],
+        "reasoning": "User reports authentication failure with correct credentials - classic auth bug. Project uses Sanctum for auth. High priority as it blocks user access to the application.",
+        "overall_confidence": 0.9,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 3941,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 3941
+    },
+    {
+      "scenario": "bugfix_critical",
+      "input": "URGENT: Stripe webhooks are failing and payments aren't being processed",
+      "expected": {
+        "task_type": "bugfix",
+        "priority": "critical",
+        "needs_clarification": false
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "api",
+          "controllers",
+          "services",
+          "queue"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "critical",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Payment"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "payments"
+          ]
+        },
+        "search_queries": [
+          "StripeWebhookController",
+          "webhook",
+          "stripe",
+          "payment",
+          "handleWebhook",
+          "PaymentService"
+        ],
+        "reasoning": "Production payment processing is broken - Stripe webhooks failing prevents payments from being recorded. Payment model exists in project. Critical priority as this directly impacts revenue and customer transactions.",
+        "overall_confidence": 0.85,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4104,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4104
+    },
+    {
+      "scenario": "bugfix_validation",
+      "input": "The email validation is not working - users can submit invalid emails",
+      "expected": {
+        "task_type": "bugfix",
+        "domains_should_contain": [
+          "validation"
+        ]
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "validation",
+          "controllers",
+          "auth"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "high",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "StoreUserRequest",
+          "RegisterRequest",
+          "email validation",
+          "UserController store",
+          "validation rules email",
+          "FormRequest"
+        ],
+        "reasoning": "Email validation is broken allowing invalid data submission - this is a validation bug. User model is involved since emails are typically on users table. High priority as it affects data integrity and user registration.",
+        "overall_confidence": 0.75,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4826,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4826
+    },
+    {
+      "scenario": "refactor_performance",
+      "input": "Optimize the product listing query - it's too slow with 10k products",
+      "expected": {
+        "task_type": "refactor",
+        "domains_should_contain": [
+          "database",
+          "models"
+        ]
+      },
+      "actual": {
+        "task_type": "refactor",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "database",
+          "models",
+          "cache"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "high",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Product",
+            "ProductController"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "products"
+          ]
+        },
+        "search_queries": [
+          "ProductController index",
+          "Product query",
+          "paginate",
+          "eager loading",
+          "query optimization",
+          "Cache::remember products"
+        ],
+        "reasoning": "User reports slow product listing with 10k records - this is a performance optimization (refactor). Project uses Service/Repository patterns which may need optimization. High priority as it affects user experience.",
+        "overall_confidence": 0.9,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4929,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4929
+    },
+    {
+      "scenario": "refactor_code_quality",
+      "input": "Refactor the UserController to use the service pattern",
+      "expected": {
+        "task_type": "refactor",
+        "entities_should_contain": {
+          "classes": [
+            "UserController"
+          ]
+        }
+      },
+      "actual": {
+        "task_type": "refactor",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "services"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "UserController"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "UserController",
+          "UserService",
+          "service pattern",
+          "User model",
+          "controller refactor"
+        ],
+        "reasoning": "User explicitly wants to refactor UserController to use service pattern. Project already uses Service Layer pattern per context, so this aligns with existing architecture. Standard refactor work to extract business logic from controller.",
+        "overall_confidence": 0.9,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4618,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4618
+    },
+    {
+      "scenario": "question_how",
+      "input": "How does Laravel handle database transactions?",
+      "expected": {
+        "task_type": "question",
+        "priority": "low",
+        "needs_clarification": false
+      },
+      "actual": {
+        "task_type": "question",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "database"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "low",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "DB::transaction",
+          "database transaction",
+          "beginTransaction",
+          "commit",
+          "rollback"
+        ],
+        "reasoning": "User is asking for information about Laravel's transaction handling - no code changes requested. This is a knowledge question about Laravel's database features.",
+        "overall_confidence": 0.95,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4274,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4274
+    },
+    {
+      "scenario": "question_explain",
+      "input": "Explain how the Order model relationships work",
+      "expected": {
+        "task_type": "question",
+        "entities_should_contain": {
+          "classes": [
+            "Order"
+          ]
+        }
+      },
+      "actual": {
+        "task_type": "question",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "models",
+          "database"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "low",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Order"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "orders"
+          ]
+        },
+        "search_queries": [
+          "Order model",
+          "Order relationships",
+          "belongsTo hasMany",
+          "Order User",
+          "Order Product"
+        ],
+        "reasoning": "User is asking for an explanation of Order model relationships - this is purely informational, no code changes requested. Order model confirmed in project context. Low priority as it's a knowledge question.",
+        "overall_confidence": 0.95,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 5577,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 5577
+    },
+    {
+      "scenario": "ambiguous_endpoint",
+      "input": "Add the API endpoint",
+      "expected": {
+        "needs_clarification": true,
+        "min_clarifying_questions": 1
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.5,
+        "domains_affected": [
+          "api",
+          "controllers",
+          "routing"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "api.php",
+          "Route::"
+        ],
+        "reasoning": "User wants to add an API endpoint but provided no details about which resource, action, or functionality. Cannot determine scope or implementation without clarification.",
+        "overall_confidence": 0.25,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Which resource should this API endpoint be for? (a) Users (b) Orders (c) Products (d) Categories (e) Payments (f) Something else",
+          "What action should the endpoint perform? (a) List/index (b) Get single item (c) Create (d) Update (e) Delete (f) Custom action - please describe"
+        ],
+        "analysis_time_ms": 4923,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4923
+    },
+    {
+      "scenario": "ambiguous_fix",
+      "input": "Fix the bug",
+      "expected": {
+        "needs_clarification": true,
+        "min_clarifying_questions": 1
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.6,
+        "domains_affected": [],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "bug",
+          "error"
+        ],
+        "reasoning": "User wants to fix a bug but provided no details about what is broken, where it occurs, or what the expected behavior should be. Cannot proceed without knowing which part of the application is affected.",
+        "overall_confidence": 0.2,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Which part of the application has the bug? (a) User management (b) Orders (c) Products (d) Payments (e) Authentication (f) Something else",
+          "What is happening vs. what should happen?",
+          "Are there any error messages or unexpected behaviors you can describe?"
+        ],
+        "analysis_time_ms": 7076,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 7076
+    },
+    {
+      "scenario": "ambiguous_reference",
+      "input": "Continue working on that feature we discussed",
+      "expected": {
+        "needs_clarification": true
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.3,
+        "domains_affected": [],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [],
+        "reasoning": "User references a prior discussion that isn't in my context. No conversation history is available, so I cannot determine what feature was discussed or what work needs to continue.",
+        "overall_confidence": 0.15,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "I don't have context from our previous conversation. Which feature would you like to continue working on?",
+          "Can you briefly describe what the feature does and where we left off?"
+        ],
+        "analysis_time_ms": 5136,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 5136
+    },
+    {
+      "scenario": "edge_empty_input",
+      "input": "",
+      "expected": {
+        "needs_clarification": true
+      },
+      "actual": {
+        "task_type": "question",
+        "task_type_confidence": 0.3,
+        "domains_affected": [],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "low",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [],
+        "reasoning": "No request was provided. I cannot analyze an empty message. I need to know what you want to build, fix, or understand.",
+        "overall_confidence": 0.1,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "What would you like me to help you with? Please describe the feature, bug, or question you have about your Laravel application."
+        ],
+        "analysis_time_ms": 4922,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4922
+    },
+    {
+      "scenario": "edge_very_long_input",
+      "input": "I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes I need to create a comprehensive user management system that includes ",
+      "expected": {
+        "task_type": "feature"
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.6,
+        "domains_affected": [
+          "auth",
+          "controllers",
+          "models",
+          "policies",
+          "routing"
+        ],
+        "scope": "cross_domain",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User",
+            "UserController"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "UserController",
+          "User model",
+          "spatie permission"
+        ],
+        "reasoning": "User wants to create a user management system but the request appears truncated/incomplete - it repeats the same phrase without specifying what features should be included. Project has User model and spatie/laravel-permission available, but I need to know the specific requirements.",
+        "overall_confidence": 0.35,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Your request appears to be cut off. What specific features should the user management system include? For example: (a) CRUD operations (b) Role/permission management (c) User profile editing (d) User search/filtering (e) All of the above",
+          "Should this be an admin-only feature or should users manage their own profiles too?"
+        ],
+        "analysis_time_ms": 7286,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 7286
+    },
+    {
+      "scenario": "edge_special_characters",
+      "input": "Add validation for email@domain.com format in the User model's $fillable array",
+      "expected": {
+        "task_type": "feature",
+        "domains_should_contain": [
+          "validation",
+          "models"
+        ]
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.85,
+        "domains_affected": [
+          "models",
+          "validation"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "User"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "users"
+          ]
+        },
+        "search_queries": [
+          "User model",
+          "User.php",
+          "$fillable",
+          "email validation",
+          "StoreUserRequest",
+          "UpdateUserRequest"
+        ],
+        "reasoning": "User wants to add email format validation. However, $fillable defines mass-assignable fields, not validation rules. Validation belongs in Form Requests or model rules. Need to clarify the actual intent.",
+        "overall_confidence": 0.5,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Do you want to: (a) Add email validation rules in a Form Request class (recommended), (b) Add validation in the User model using a $rules property, or (c) Something else with the $fillable array?",
+          "Should this validation apply to: (a) User registration only, (b) User profile updates only, or (c) Both?"
+        ],
+        "analysis_time_ms": 8693,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 8693
+    },
+    {
+      "scenario": "context_continuation",
+      "input": "Now add pagination to it",
+      "expected": {
+        "task_type": "feature"
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.75,
+        "domains_affected": [
+          "controllers",
+          "services"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [
+            "app/Models/Order.php",
+            "app/Http/Controllers/OrderController.php"
+          ],
+          "classes": [
+            "Order",
+            "OrderController",
+            "OrderService"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "orders"
+          ]
+        },
+        "search_queries": [
+          "OrderController index",
+          "OrderService",
+          "paginate",
+          "Order list"
+        ],
+        "reasoning": "User wants to add pagination, likely to the order listing based on conversation context (Order model was just created, export feature is pending). The confirmed entities point to Order-related files. However, 'it' is ambiguous.",
+        "overall_confidence": 0.45,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Which listing should have pagination added? (a) Orders index (b) Order export feature (c) Something else",
+          "What pagination style do you prefer? (a) Simple paginate (b) Cursor pagination for large datasets (c) Default Laravel pagination"
+        ],
+        "analysis_time_ms": 6074,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 6074
+    },
+    {
+      "scenario": "context_with_history",
+      "input": "Actually, let's do both caching and pagination",
+      "expected": {
+        "task_type": "feature",
+        "domains_should_contain": [
+          "cache"
+        ]
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "cache",
+          "database",
+          "services"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "medium",
+        "entities": {
+          "files": [
+            "app/Models/Order.php",
+            "app/Http/Controllers/OrderController.php"
+          ],
+          "classes": [
+            "Order",
+            "OrderController",
+            "OrderService"
+          ],
+          "methods": [
+            "index"
+          ],
+          "routes": [],
+          "tables": [
+            "orders",
+            "order_items"
+          ]
+        },
+        "search_queries": [
+          "OrderController index",
+          "OrderService",
+          "Order model",
+          "Cache::remember",
+          "paginate",
+          "query optimization"
+        ],
+        "reasoning": "User confirmed they want both caching and pagination for the slow order list. Files and classes are confirmed from conversation context. This is performance optimization work on existing functionality.",
+        "overall_confidence": 0.95,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 4597,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 4597
+    },
+    {
+      "scenario": "priority_critical_security",
+      "input": "SECURITY: Found SQL injection vulnerability in the search endpoint",
+      "expected": {
+        "task_type": "bugfix",
+        "priority": "critical"
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "database",
+          "validation",
+          "api"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "critical",
+        "entities": {
+          "files": [],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "search",
+          "whereRaw",
+          "DB::raw",
+          "query",
+          "searchController",
+          "ProductController search",
+          "OrderController search"
+        ],
+        "reasoning": "SQL injection is a critical security vulnerability requiring immediate fix. User mentioned 'search endpoint' but didn't specify which controller or resource. Need to identify the vulnerable code location before proceeding.",
+        "overall_confidence": 0.4,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Which search endpoint has the vulnerability? (a) Product search (b) Order search (c) User search (d) Other - please specify",
+          "Do you have the specific file or line where the raw query is being used?"
+        ],
+        "analysis_time_ms": 6173,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 6173
+    },
+    {
+      "scenario": "priority_high_customer",
+      "input": "Customers are complaining that checkout is failing intermittently",
+      "expected": {
+        "task_type": "bugfix",
+        "priority_in": [
+          "high",
+          "critical"
+        ]
+      },
+      "actual": {
+        "task_type": "bugfix",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "controllers",
+          "services",
+          "database",
+          "queue"
+        ],
+        "scope": "feature",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": false,
+        "priority": "critical",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Order",
+            "Payment"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "orders",
+            "payments"
+          ]
+        },
+        "search_queries": [
+          "CheckoutController",
+          "OrderService",
+          "PaymentService",
+          "checkout",
+          "store order",
+          "payment processing",
+          "transaction"
+        ],
+        "reasoning": "Intermittent checkout failures affecting customers is a critical production bug impacting revenue. Project has Order and Payment models with service layer pattern. Need to investigate checkout flow, payment processing, and potential race conditions or timeout issues.",
+        "overall_confidence": 0.75,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 5131,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 5131
+    },
+    {
+      "scenario": "priority_low_docs",
+      "input": "Update the README with the new API endpoints",
+      "expected": {
+        "priority": "low"
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.85,
+        "domains_affected": [
+          "api"
+        ],
+        "scope": "single_file",
+        "languages": [
+          "markdown"
+        ],
+        "requires_migration": false,
+        "priority": "low",
+        "entities": {
+          "files": [
+            "README.md"
+          ],
+          "classes": [],
+          "methods": [],
+          "routes": [],
+          "tables": []
+        },
+        "search_queries": [
+          "README",
+          "api.php",
+          "Route::",
+          "API endpoints",
+          "documentation"
+        ],
+        "reasoning": "User wants to update documentation with API endpoint information. This is a documentation task affecting README.md. Low priority as it's non-functional change.",
+        "overall_confidence": 0.5,
+        "needs_clarification": true,
+        "clarifying_questions": [
+          "Which API endpoints should be documented? (a) All existing endpoints (b) Specific new endpoints you've added (c) Only the Order API endpoints",
+          "What format do you want for the documentation? (a) Simple list with methods and paths (b) Detailed with request/response examples (c) OpenAPI/Swagger style"
+        ],
+        "analysis_time_ms": 6639,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 6639
+    },
+    {
+      "scenario": "multi_domain_full_feature",
+      "input": "Implement a complete order notification system with email, queue jobs, and database logging",
+      "expected": {
+        "task_type": "feature",
+        "scope": "cross_domain",
+        "domains_should_contain": [
+          "mail",
+          "queue",
+          "database"
+        ]
+      },
+      "actual": {
+        "task_type": "feature",
+        "task_type_confidence": 0.95,
+        "domains_affected": [
+          "events",
+          "listeners",
+          "mail",
+          "queue",
+          "database",
+          "models",
+          "services"
+        ],
+        "scope": "cross_domain",
+        "languages": [
+          "php"
+        ],
+        "requires_migration": true,
+        "priority": "medium",
+        "entities": {
+          "files": [],
+          "classes": [
+            "Order"
+          ],
+          "methods": [],
+          "routes": [],
+          "tables": [
+            "orders"
+          ]
+        },
+        "search_queries": [
+          "Order model",
+          "OrderController",
+          "Event Listener",
+          "Mailable notification",
+          "Job queue dispatch",
+          "order_notifications migration",
+          "OrderService"
+        ],
+        "reasoning": "User wants a complete notification system for orders involving email, queued jobs, and database logging. This is a cross-domain feature touching events, mail, queue, and database. Migration needed for notification logs table.",
+        "overall_confidence": 0.85,
+        "needs_clarification": false,
+        "clarifying_questions": [],
+        "analysis_time_ms": 5322,
+        "retry_count": 0
+      },
+      "passed": true,
+      "errors": [],
+      "elapsed_ms": 5322
+    }
+  ]
+}
