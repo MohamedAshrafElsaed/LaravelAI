@@ -1,20 +1,62 @@
 """
-Planner Agent.
+Blueprint - Planner Agent (v2 Enhanced)
 
 Creates execution plans for implementing features, fixes, and refactors.
-Uses Claude Sonnet for complex reasoning about implementation steps.
+Uses Claude Sonnet with Structured Outputs for guaranteed schema compliance.
+
+Key Features:
+- Pydantic-based structured outputs for plan validation
+- Chain-of-thought reasoning captured in plan
+- Dependency graph validation (no circular deps)
+- Confidence and risk scoring
+- No-guessing policy with clarification support
+- Retry with exponential backoff (max 2 retries)
+- Integration with Nova's intent and Scout's context
+- Laravel-specific conventions enforcement
 """
+import asyncio
 import json
 import logging
 import re
-from typing import Optional
+import time
 from dataclasses import dataclass, field, asdict
+from typing import Optional
 
+from pydantic import ValidationError
+
+from app.agents.agent_identity import AgentType, get_agent
 from app.agents.intent_analyzer import Intent
 from app.agents.context_retriever import RetrievedContext
+from app.agents.plan_schema import (
+    PlanOutput,
+    PlanStepOutput,
+    PlanReasoningOutput,
+    ActionType,
+    StepCategory,
+    RiskLevel,
+    get_plan_json_schema,
+    validate_dependency_order,
+    CATEGORY_ORDER,
+)
+from app.agents.blueprint_system_prompt import (
+    BLUEPRINT_SYSTEM_PROMPT,
+    BLUEPRINT_USER_PROMPT_TEMPLATE,
+)
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Configuration
+MAX_RETRIES = 2
+INITIAL_RETRY_DELAY = 1.0  # seconds
+CONFIDENCE_THRESHOLD_FOR_CLARIFICATION = 0.5
+
+MODEL_MAP = {
+    "haiku": ClaudeModel.HAIKU,
+    "sonnet": ClaudeModel.SONNET,
+    "opus": ClaudeModel.OPUS,
+}
 
 
 def extract_json(text: str) -> Optional[dict]:
@@ -40,10 +82,10 @@ def extract_json(text: str) -> Optional[dict]:
 
     # Try to extract from markdown code block
     code_block_patterns = [
-        r'```json\s*\n(.*?)\n```',  # ```json ... ```
-        r'```\s*\n(.*?)\n```',       # ``` ... ```
-        r'```json(.*?)```',           # ```json...``` (no newlines)
-        r'```(.*?)```',               # ```...``` (no newlines)
+        r'```json\s*\n(.*?)\n```',
+        r'```\s*\n(.*?)\n```',
+        r'```json(.*?)```',
+        r'```(.*?)```',
     ]
 
     for pattern in code_block_patterns:
@@ -55,7 +97,6 @@ def extract_json(text: str) -> Optional[dict]:
                 continue
 
     # Try to find JSON object by looking for { ... }
-    # Find the first { and last }
     first_brace = text.find('{')
     last_brace = text.rfind('}')
 
@@ -80,171 +121,6 @@ def safe_format(template: str, **kwargs) -> str:
     return result
 
 
-# SYSTEM prompt - static, cacheable (role, guidelines, examples, format)
-# This gets cached by Claude's prompt caching for 90% cost reduction
-PLANNING_SYSTEM_PROMPT = """<role>
-You are a senior Laravel architect creating implementation plans. Your plans directly drive code generation, so they must be precise, complete, and correctly ordered. A well-structured plan prevents compilation errors and ensures dependencies are created before they're needed.
-</role>
-
-<default_to_action>
-Create a complete, actionable plan. Include all files that need to be created or modified. Don't leave steps vague - be specific about what each file should contain or how it should change.
-</default_to_action>
-
-<planning_guidelines>
-Think through the logical order of operations before creating your plan:
-
-1. **Dependency Order** (CRITICAL):
-   - Migrations MUST come before models that use them
-   - Models MUST come before controllers/services that reference them
-   - Traits/Interfaces MUST come before classes that use them
-   - Config files MUST come before code that reads them
-
-2. **Laravel Conventions**:
-   - Use singular names for models (User, not Users)
-   - Use plural names for controllers (UsersController)
-   - Place business logic in Services, not Controllers
-   - Use Form Requests for validation
-   - Use API Resources for response formatting
-
-3. **Completeness Checklist**:
-   - [ ] Database migrations (if schema changes needed)
-   - [ ] Models with relationships and fillable
-   - [ ] Form Request for validation
-   - [ ] Service class for business logic
-   - [ ] Controller with proper methods
-   - [ ] Routes in appropriate route file
-   - [ ] API Resource (for API endpoints)
-   - [ ] Update any existing related files
-
-4. **Action Types**:
-   - "create": New file that doesn't exist
-   - "modify": Change existing file (must exist in codebase)
-   - "delete": Remove file (rare, use cautiously)
-</planning_guidelines>
-
-<output_format>
-{
-  "summary": "One sentence describing what this plan accomplishes",
-  "steps": [
-    {
-      "order": 1,
-      "action": "create" | "modify" | "delete",
-      "file": "full/path/to/File.php",
-      "description": "Specific description of what to create/change"
-    }
-  ]
-}
-</output_format>
-
-<examples>
-<example_simple>
-<request>Add a method to check if a user's subscription is active</request>
-<plan>
-{
-  "summary": "Add isSubscriptionActive() method to User model",
-  "steps": [
-    {
-      "order": 1,
-      "action": "modify",
-      "file": "app/Models/User.php",
-      "description": "Add isSubscriptionActive() method that checks if subscription_ends_at is in the future and status is 'active'"
-    }
-  ]
-}
-</plan>
-</example_simple>
-
-<example_complex>
-<request>Create a product reviews feature where users can rate products 1-5 stars and leave comments</request>
-<plan>
-{
-  "summary": "Create complete product review system with ratings and comments",
-  "steps": [
-    {
-      "order": 1,
-      "action": "create",
-      "file": "database/migrations/2024_01_15_000001_create_reviews_table.php",
-      "description": "Create reviews table with: id, user_id (foreign), product_id (foreign), rating (tinyint 1-5), comment (text nullable), timestamps. Add indexes on user_id, product_id, and rating"
-    },
-    {
-      "order": 2,
-      "action": "create",
-      "file": "app/Models/Review.php",
-      "description": "Create Review model with fillable [user_id, product_id, rating, comment], belongsTo relationships to User and Product, rating validation accessor"
-    },
-    {
-      "order": 3,
-      "action": "modify",
-      "file": "app/Models/Product.php",
-      "description": "Add hasMany relationship to Review, add averageRating() method that calculates mean rating, add reviewsCount() method"
-    },
-    {
-      "order": 4,
-      "action": "modify",
-      "file": "app/Models/User.php",
-      "description": "Add hasMany relationship to Review"
-    },
-    {
-      "order": 5,
-      "action": "create",
-      "file": "app/Http/Requests/StoreReviewRequest.php",
-      "description": "Create form request with validation: rating required|integer|between:1,5, comment nullable|string|max:1000. Add authorization check that user hasn't already reviewed this product"
-    },
-    {
-      "order": 6,
-      "action": "create",
-      "file": "app/Http/Resources/ReviewResource.php",
-      "description": "Create API resource exposing id, rating, comment, user (name only), created_at formatted"
-    },
-    {
-      "order": 7,
-      "action": "create",
-      "file": "app/Http/Controllers/Api/ReviewController.php",
-      "description": "Create controller with index (list product reviews with pagination), store (create review), update (edit own review), destroy (delete own review) methods"
-    },
-    {
-      "order": 8,
-      "action": "modify",
-      "file": "routes/api.php",
-      "description": "Add resource route for reviews nested under products: Route::apiResource('products.reviews', ReviewController::class)"
-    }
-  ]
-}
-</plan>
-</example_complex>
-</examples>
-
-<verification>
-Before finalizing your plan, verify:
-1. Dependencies are ordered correctly (migrations → models → services → controllers → routes)
-2. All necessary files are included (no missing pieces)
-3. File paths follow Laravel conventions
-4. Descriptions are specific enough to guide code generation
-5. No circular dependencies exist
-</verification>
-
-Respond ONLY with the JSON object."""
-
-# USER prompt template - dynamic, contains the actual request and context
-PLANNING_USER_PROMPT = """<task_context>
-<user_request>{user_input}</user_request>
-<intent>
-- Task Type: {task_type}
-- Scope: {scope}
-- Domains Affected: {domains}
-- Requires Migration: {requires_migration}
-</intent>
-</task_context>
-
-<project_info>
-{project_context}
-</project_info>
-
-<codebase_context>
-{context}
-</codebase_context>"""
-
-
 @dataclass
 class PlanStep:
     """A single step in an execution plan."""
@@ -253,6 +129,9 @@ class PlanStep:
     action: str  # create, modify, delete
     file: str
     description: str
+    category: str = "other"
+    depends_on: list[int] = field(default_factory=list)
+    estimated_lines: int = 50
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -261,9 +140,7 @@ class PlanStep:
     @classmethod
     def from_dict(cls, data: dict) -> "PlanStep":
         """Create from dictionary."""
-        # Defensive check - ensure data is a dict
         if isinstance(data, str):
-            # Try to parse as JSON if it's a string
             try:
                 data = json.loads(data)
             except (json.JSONDecodeError, TypeError):
@@ -277,6 +154,44 @@ class PlanStep:
             action=data.get("action", "modify"),
             file=data.get("file", ""),
             description=data.get("description", ""),
+            category=data.get("category", "other"),
+            depends_on=data.get("depends_on", []),
+            estimated_lines=data.get("estimated_lines", 50),
+        )
+
+    @classmethod
+    def from_output(cls, output: PlanStepOutput) -> "PlanStep":
+        """Create from validated PlanStepOutput."""
+        return cls(
+            order=output.order,
+            action=output.action,
+            file=output.file,
+            description=output.description,
+            category=output.category,
+            depends_on=output.depends_on,
+            estimated_lines=output.estimated_lines,
+        )
+
+
+@dataclass
+class PlanReasoning:
+    """Chain-of-thought reasoning for the plan."""
+
+    understanding: str = ""
+    approach: str = ""
+    dependency_analysis: str = ""
+    risks_considered: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_output(cls, output: PlanReasoningOutput) -> "PlanReasoning":
+        return cls(
+            understanding=output.understanding,
+            approach=output.approach,
+            dependency_analysis=output.dependency_analysis,
+            risks_considered=output.risks_considered,
         )
 
 
@@ -287,17 +202,44 @@ class Plan:
     summary: str
     steps: list[PlanStep] = field(default_factory=list)
 
+    # Reasoning (chain-of-thought)
+    reasoning: Optional[PlanReasoning] = None
+
+    # Quality metrics
+    overall_confidence: float = 0.0
+    risk_level: str = "medium"
+    estimated_complexity: int = 5
+
+    # Clarification handling
+    needs_clarification: bool = False
+    clarifying_questions: list[str] = field(default_factory=list)
+
+    # Warnings
+    warnings: list[str] = field(default_factory=list)
+
+    # Metadata
+    planning_time_ms: int = 0
+    retry_count: int = 0
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
             "summary": self.summary,
             "steps": [step.to_dict() for step in self.steps],
+            "reasoning": self.reasoning.to_dict() if self.reasoning else None,
+            "overall_confidence": self.overall_confidence,
+            "risk_level": self.risk_level,
+            "estimated_complexity": self.estimated_complexity,
+            "needs_clarification": self.needs_clarification,
+            "clarifying_questions": self.clarifying_questions,
+            "warnings": self.warnings,
+            "planning_time_ms": self.planning_time_ms,
+            "retry_count": self.retry_count,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Plan":
-        """Create from dictionary."""
-        # Defensive check - ensure data is a dict
+        """Create from dictionary (for backwards compatibility)."""
         if isinstance(data, str):
             try:
                 data = json.loads(data)
@@ -312,17 +254,123 @@ class Plan:
             steps_data = []
 
         steps = [PlanStep.from_dict(s) for s in steps_data]
+
+        reasoning_data = data.get("reasoning")
+        reasoning = None
+        if reasoning_data and isinstance(reasoning_data, dict):
+            reasoning = PlanReasoning(
+                understanding=reasoning_data.get("understanding", ""),
+                approach=reasoning_data.get("approach", ""),
+                dependency_analysis=reasoning_data.get("dependency_analysis", ""),
+                risks_considered=reasoning_data.get("risks_considered", ""),
+            )
+
         return cls(
             summary=data.get("summary", ""),
             steps=sorted(steps, key=lambda s: s.order),
+            reasoning=reasoning,
+            overall_confidence=data.get("overall_confidence", 0.0),
+            risk_level=data.get("risk_level", "medium"),
+            estimated_complexity=data.get("estimated_complexity", 5),
+            needs_clarification=data.get("needs_clarification", False),
+            clarifying_questions=data.get("clarifying_questions", []),
+            warnings=data.get("warnings", []),
         )
+
+    @classmethod
+    def from_output(
+        cls,
+        output: PlanOutput,
+        planning_time_ms: int = 0,
+        retry_count: int = 0,
+    ) -> "Plan":
+        """Create Plan from validated PlanOutput."""
+        return cls(
+            summary=output.summary,
+            steps=[PlanStep.from_output(s) for s in output.steps],
+            reasoning=PlanReasoning.from_output(output.reasoning),
+            overall_confidence=output.overall_confidence,
+            risk_level=output.risk_level,
+            estimated_complexity=output.estimated_complexity,
+            needs_clarification=output.needs_clarification,
+            clarifying_questions=output.clarifying_questions,
+            warnings=output.warnings,
+            planning_time_ms=planning_time_ms,
+            retry_count=retry_count,
+        )
+
+    @classmethod
+    def clarification_required(
+        cls,
+        questions: list[str],
+        reasoning: str = "Insufficient information to create plan",
+    ) -> "Plan":
+        """Create a Plan that requires clarification (pipeline should prompt user)."""
+        return cls(
+            summary="Cannot create plan - clarification needed",
+            steps=[],
+            reasoning=PlanReasoning(
+                understanding="Request requires clarification",
+                approach=reasoning,
+                dependency_analysis="N/A",
+                risks_considered="Risk of incorrect implementation without clarity",
+            ),
+            overall_confidence=0.2,
+            risk_level="medium",
+            estimated_complexity=1,
+            needs_clarification=True,
+            clarifying_questions=questions,
+        )
+
+    @classmethod
+    def error_fallback(cls, error_message: str) -> "Plan":
+        """Create a fallback Plan on unrecoverable error."""
+        return cls(
+            summary=f"Planning failed: {error_message}",
+            steps=[],
+            reasoning=PlanReasoning(
+                understanding="Error occurred during planning",
+                approach=f"Error: {error_message}",
+                dependency_analysis="N/A",
+                risks_considered="Cannot assess risks due to error",
+            ),
+            overall_confidence=0.0,
+            risk_level="high",
+            estimated_complexity=1,
+            needs_clarification=True,
+            clarifying_questions=[
+                "I encountered an error creating the plan. Could you rephrase your request?",
+                "What specific outcome are you trying to achieve?",
+            ],
+        )
+
+    def should_halt_pipeline(self) -> bool:
+        """Check if pipeline should halt for clarification."""
+        return (
+            self.needs_clarification or
+            self.overall_confidence < CONFIDENCE_THRESHOLD_FOR_CLARIFICATION or
+            len(self.steps) == 0
+        )
+
+    def get_files_to_create(self) -> list[str]:
+        """Get list of files that will be created."""
+        return [s.file for s in self.steps if s.action == "create"]
+
+    def get_files_to_modify(self) -> list[str]:
+        """Get list of files that will be modified."""
+        return [s.file for s in self.steps if s.action == "modify"]
+
+    def total_estimated_lines(self) -> int:
+        """Get total estimated lines of code."""
+        return sum(s.estimated_lines for s in self.steps)
 
 
 class Planner:
     """
-    Creates execution plans for code changes.
+    Blueprint - Creates execution plans for code changes.
 
-    Uses Claude Sonnet for complex reasoning about implementation.
+    Uses Claude Sonnet with Structured Outputs for guaranteed schema compliance.
+    Implements chain-of-thought reasoning for better plan quality.
     """
 
     def __init__(self, claude_service: Optional[ClaudeService] = None):
@@ -333,7 +381,50 @@ class Planner:
             claude_service: Optional Claude service instance.
         """
         self.claude = claude_service or get_claude_service()
-        logger.info("[PLANNER] Initialized")
+        self.identity = get_agent(AgentType.BLUEPRINT)
+        self._schema = get_plan_json_schema()
+
+        logger.info(f"[{self.identity.name.upper()}] Initialized with Sonnet + Structured Outputs")
+
+    def _build_user_prompt(
+        self,
+        user_input: str,
+        intent: Intent,
+        context: RetrievedContext,
+        project_context: str = "",
+    ) -> str:
+        """
+        Build the user prompt with all context.
+
+        Args:
+            user_input: Original user request
+            intent: Analyzed intent from Nova
+            context: Retrieved codebase context from Scout
+            project_context: Rich project context
+
+        Returns:
+            Formatted user prompt
+        """
+        # Extract entities from intent
+        entities = intent.entities if isinstance(intent.entities, dict) else {}
+
+        return safe_format(
+            BLUEPRINT_USER_PROMPT_TEMPLATE,
+            user_input=user_input,
+            task_type=intent.task_type,
+            scope=intent.scope,
+            domains=", ".join(intent.domains_affected) or "general",
+            priority=intent.priority,
+            requires_migration="Yes" if intent.requires_migration else "No",
+            intent_confidence=f"{intent.overall_confidence:.2f}",
+            entity_files=", ".join(entities.get("files", [])) or "None specified",
+            entity_classes=", ".join(entities.get("classes", [])) or "None specified",
+            entity_methods=", ".join(entities.get("methods", [])) or "None specified",
+            entity_routes=", ".join(entities.get("routes", [])) or "None specified",
+            entity_tables=", ".join(entities.get("tables", [])) or "None specified",
+            project_context=project_context or "No project context available",
+            retrieved_context=context.to_prompt_string(),
+        )
 
     async def plan(
         self,
@@ -347,76 +438,238 @@ class Planner:
 
         Args:
             user_input: Original user request
-            intent: Analyzed intent
-            context: Retrieved codebase context
+            intent: Analyzed intent from Nova
+            context: Retrieved codebase context from Scout
             project_context: Rich project context (stack, conventions, etc.)
 
         Returns:
             Plan with ordered steps
-        """
-        logger.info(f"[PLANNER] Creating plan for: {user_input[:100]}...")
 
-        # Build the user prompt with dynamic content
-        user_prompt = safe_format(
-            PLANNING_USER_PROMPT,
+        Note:
+            If needs_clarification=True, the pipeline should prompt the user.
+            Check plan.should_halt_pipeline() before proceeding to execution.
+        """
+        start_time = time.time()
+
+        logger.info(f"[{self.identity.name.upper()}] {self.identity.get_random_greeting()}")
+        logger.info(f"[{self.identity.name.upper()}] Creating plan for: {user_input[:100]}...")
+
+        # Build the user prompt
+        user_prompt = self._build_user_prompt(
             user_input=user_input,
-            task_type=intent.task_type,
-            scope=intent.scope,
-            domains=", ".join(intent.domains_affected) or "general",
-            requires_migration="Yes" if intent.requires_migration else "No",
+            intent=intent,
+            context=context,
             project_context=project_context,
-            context=context.to_prompt_string(),
         )
 
-        # Using system parameter for caching - the static system prompt gets cached
+        # Attempt planning with retries
+        last_error: Optional[Exception] = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                plan = await self._call_claude_structured(
+                    user_prompt=user_prompt,
+                    attempt=attempt,
+                )
+
+                # Calculate timing
+                planning_time_ms = int((time.time() - start_time) * 1000)
+                plan.planning_time_ms = planning_time_ms
+                plan.retry_count = attempt
+
+                # Validate dependency order and add warnings
+                if plan.steps:
+                    step_outputs = [
+                        PlanStepOutput(
+                            order=s.order,
+                            action=ActionType(s.action),
+                            file=s.file,
+                            category=StepCategory(s.category) if s.category in [e.value for e in StepCategory] else StepCategory.OTHER,
+                            description=s.description,
+                            depends_on=s.depends_on,
+                            estimated_lines=s.estimated_lines,
+                        )
+                        for s in plan.steps
+                    ]
+                    order_warnings = validate_dependency_order(step_outputs)
+                    plan.warnings.extend(order_warnings)
+
+                # Log result
+                self._log_plan_result(plan)
+
+                return plan
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"[{self.identity.name.upper()}] Attempt {attempt + 1}/{MAX_RETRIES + 1} failed: {e}"
+                )
+
+                if attempt < MAX_RETRIES:
+                    delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                    logger.info(f"[{self.identity.name.upper()}] Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+
+        # All retries failed
+        logger.error(f"[{self.identity.name.upper()}] All retries exhausted. Error: {last_error}")
+
+        planning_time_ms = int((time.time() - start_time) * 1000)
+        fallback = Plan.error_fallback(str(last_error))
+        fallback.planning_time_ms = planning_time_ms
+        fallback.retry_count = MAX_RETRIES
+
+        return fallback
+
+    async def _call_claude_structured(self, user_prompt: str, attempt: int) -> Plan:
+        """
+        Call Claude with structured output expectations.
+
+        Args:
+            user_prompt: The formatted user prompt
+            attempt: Current attempt number (for logging)
+
+        Returns:
+            Validated Plan object
+        """
+        logger.debug(f"[{self.identity.name.upper()}] {self.identity.get_random_thinking()}")
+
         messages = [{"role": "user", "content": user_prompt}]
 
+        # Use Claude service with caching for system prompt
+        response = await self.claude.chat_async(
+            model=MODEL_MAP.get(settings.blueprint_model, ClaudeModel.SONNET),
+            messages=messages,
+            system=BLUEPRINT_SYSTEM_PROMPT,
+            temperature=0.5,  # Slightly higher for creative planning
+            max_tokens=4096,
+            request_type="planning",
+            use_cache=True,  # Cache the static system prompt
+        )
+
+        # Parse and validate response
+        plan_output = self._parse_and_validate(response)
+        return Plan.from_output(plan_output)
+
+    def _parse_and_validate(self, response: str) -> PlanOutput:
+        """
+        Parse Claude's response and validate against schema.
+
+        Args:
+            response: Raw response from Claude
+
+        Returns:
+            Validated PlanOutput
+
+        Raises:
+            ValueError: If response cannot be parsed or validated
+        """
+        if not response:
+            raise ValueError("Empty response from Claude")
+
+        # Extract JSON from response
+        plan_data = extract_json(response)
+
+        if not plan_data:
+            logger.error(f"[{self.identity.name.upper()}] Could not extract JSON")
+            logger.error(f"[{self.identity.name.upper()}] Raw (first 500): {response[:500]}")
+            raise ValueError("Could not extract JSON from response")
+
+        # Validate with Pydantic
         try:
-            response = await self.claude.chat_async(
-                model=ClaudeModel.SONNET,
-                messages=messages,
-                system=PLANNING_SYSTEM_PROMPT,  # Static prompt - gets cached!
-                temperature=0.5,
-                max_tokens=4096,
-                request_type="planning",
-            )
+            plan_output = PlanOutput.model_validate(plan_data)
+            logger.info(f"[{self.identity.name.upper()}] Schema validation passed")
+            return plan_output
 
-            # Log raw response for debugging
-            logger.info(f"[PLANNER] Received response ({len(response) if response else 0} chars)")
-            if not response:
-                logger.error("[PLANNER] Empty response from Claude")
-                return Plan(
-                    summary="Failed to create plan - empty response from AI",
-                    steps=[],
-                )
+        except ValidationError as e:
+            errors = [f"{err['loc']}: {err['msg']}" for err in e.errors()]
+            logger.error(f"[{self.identity.name.upper()}] Validation failed: {errors}")
 
-            # Extract JSON from response (handles various formats)
-            plan_data = extract_json(response)
+            # Try to create a partial plan from what we have
+            partial_plan = self._create_partial_plan(plan_data, errors)
+            if partial_plan:
+                return partial_plan
 
-            if not plan_data:
-                logger.error(f"[PLANNER] Could not extract JSON from response")
-                logger.error(f"[PLANNER] Raw response (first 500 chars): {response[:500]}")
-                return Plan(
-                    summary="Failed to create plan - could not parse response",
-                    steps=[],
-                )
+            raise ValueError(f"Schema validation failed: {errors}")
 
-            plan = Plan.from_dict(plan_data)
+    def _create_partial_plan(
+        self,
+        data: dict,
+        errors: list[str],
+    ) -> Optional[PlanOutput]:
+        """
+        Attempt to create a partial plan from invalid data.
 
-            logger.info(f"[PLANNER] Plan created: {plan.summary}")
-            logger.info(f"[PLANNER] Steps: {len(plan.steps)}")
-            for step in plan.steps:
-                logger.info(f"[PLANNER]   {step.order}. [{step.action}] {step.file}")
+        Used when validation fails but we have usable data.
+        """
+        try:
+            # Try to fix common issues
+            steps = data.get("steps", [])
+            if steps:
+                # Ensure steps have required fields
+                fixed_steps = []
+                for i, step in enumerate(steps):
+                    if isinstance(step, dict):
+                        fixed_step = {
+                            "order": step.get("order", i + 1),
+                            "action": step.get("action", "modify"),
+                            "file": step.get("file", "unknown"),
+                            "category": step.get("category", "other"),
+                            "description": step.get("description", "No description"),
+                            "depends_on": step.get("depends_on", []),
+                            "estimated_lines": step.get("estimated_lines", 50),
+                        }
+                        fixed_steps.append(fixed_step)
 
-            return plan
+                data["steps"] = fixed_steps
+
+            # Ensure reasoning exists
+            if "reasoning" not in data or not data["reasoning"]:
+                data["reasoning"] = {
+                    "understanding": "Recovered from partial data",
+                    "approach": "Plan may be incomplete",
+                    "dependency_analysis": "Unable to fully analyze",
+                    "risks_considered": "Validation errors occurred",
+                }
+
+            # Set defaults for missing fields
+            data.setdefault("summary", "Plan recovered from partial data")
+            data.setdefault("overall_confidence", 0.5)
+            data.setdefault("risk_level", "medium")
+            data.setdefault("estimated_complexity", 5)
+            data.setdefault("needs_clarification", False)
+            data.setdefault("clarifying_questions", [])
+            data.setdefault("warnings", [f"Plan recovered with validation issues: {errors[:2]}"])
+
+            return PlanOutput.model_validate(data)
 
         except Exception as e:
-            logger.error(f"[PLANNER] Planning failed: {e}")
-            logger.exception("[PLANNER] Full traceback:")
-            return Plan(
-                summary=f"Failed to create plan - {str(e)}",
-                steps=[],
+            logger.warning(f"[{self.identity.name.upper()}] Could not create partial plan: {e}")
+            return None
+
+    def _log_plan_result(self, plan: Plan) -> None:
+        """Log the planning result."""
+        logger.info(f"[{self.identity.name.upper()}] {self.identity.get_random_completion()}")
+        logger.info(f"[{self.identity.name.upper()}] Summary: {plan.summary}")
+        logger.info(f"[{self.identity.name.upper()}] Steps: {len(plan.steps)}")
+        logger.info(f"[{self.identity.name.upper()}] Confidence: {plan.overall_confidence:.2f}")
+        logger.info(f"[{self.identity.name.upper()}] Risk: {plan.risk_level}")
+        logger.info(f"[{self.identity.name.upper()}] Complexity: {plan.estimated_complexity}/10")
+
+        if plan.needs_clarification:
+            logger.info(f"[{self.identity.name.upper()}] ⚠️ CLARIFICATION NEEDED")
+            for q in plan.clarifying_questions:
+                logger.info(f"[{self.identity.name.upper()}]   - {q}")
+
+        for step in plan.steps:
+            logger.info(
+                f"[{self.identity.name.upper()}]   {step.order}. [{step.action}] "
+                f"[{step.category}] {step.file}"
             )
+
+        if plan.warnings:
+            for warning in plan.warnings:
+                logger.warning(f"[{self.identity.name.upper()}] ⚠️ {warning}")
+
+        logger.info(f"[{self.identity.name.upper()}] Planning time: {plan.planning_time_ms}ms")
 
     async def refine_plan(
         self,
@@ -435,11 +688,9 @@ class Planner:
         Returns:
             Refined plan
         """
-        logger.info(f"[PLANNER] Refining plan based on feedback")
+        logger.info(f"[{self.identity.name.upper()}] Refining plan based on feedback")
 
-        # For refine_plan, we use a simpler prompt structure
-        # since it's less frequently called and context varies more
-        prompt = f"""You are an expert Laravel developer refining an implementation plan.
+        prompt = f"""You are Blueprint, refining an implementation plan based on feedback.
 
 ## Current Plan
 {json.dumps(plan.to_dict(), indent=2)}
@@ -456,42 +707,77 @@ Refine the plan to address the feedback. You can:
 - Modify existing steps
 - Remove unnecessary steps
 - Reorder steps
+- Update descriptions for clarity
 
-Respond with the complete updated plan as a JSON object:
-{{
-  "summary": "Updated summary",
-  "steps": [...]
-}}
+Maintain proper dependency ordering and ensure the plan remains complete.
 
-Respond ONLY with the JSON object."""
+Respond with the complete updated plan as a JSON object matching the schema."""
 
         messages = [{"role": "user", "content": prompt}]
 
         try:
             response = await self.claude.chat_async(
-                model=ClaudeModel.SONNET,
+                model=MODEL_MAP.get(settings.blueprint_model, ClaudeModel.SONNET),
                 messages=messages,
+                system=BLUEPRINT_SYSTEM_PROMPT,
                 temperature=0.5,
                 max_tokens=4096,
                 request_type="planning",
             )
 
             if not response:
-                logger.error("[PLANNER] Empty response when refining plan")
+                logger.error(f"[{self.identity.name.upper()}] Empty response when refining")
                 return plan
 
             plan_data = extract_json(response)
 
             if not plan_data:
-                logger.error(f"[PLANNER] Could not extract JSON when refining plan")
-                logger.error(f"[PLANNER] Raw response (first 500 chars): {response[:500]}")
+                logger.error(f"[{self.identity.name.upper()}] Could not extract JSON when refining")
                 return plan
 
-            refined_plan = Plan.from_dict(plan_data)
+            try:
+                plan_output = PlanOutput.model_validate(plan_data)
+                refined_plan = Plan.from_output(plan_output)
+                logger.info(f"[{self.identity.name.upper()}] Plan refined: {refined_plan.summary}")
+                return refined_plan
 
-            logger.info(f"[PLANNER] Plan refined: {refined_plan.summary}")
-            return refined_plan
+            except ValidationError as e:
+                logger.warning(f"[{self.identity.name.upper()}] Refined plan validation failed: {e}")
+                # Fall back to dict parsing
+                return Plan.from_dict(plan_data)
 
         except Exception as e:
-            logger.error(f"[PLANNER] Plan refinement failed: {e}")
+            logger.error(f"[{self.identity.name.upper()}] Plan refinement failed: {e}")
             return plan  # Return original plan on failure
+
+    async def validate_plan_against_context(
+        self,
+        plan: Plan,
+        context: RetrievedContext,
+    ) -> list[str]:
+        """
+        Validate that plan files exist in context where expected.
+
+        Args:
+            plan: The plan to validate
+            context: Retrieved codebase context
+
+        Returns:
+            List of validation warnings
+        """
+        warnings = []
+        context_files = {chunk.file_path for chunk in context.chunks}
+
+        for step in plan.steps:
+            if step.action == "modify":
+                # Check if file exists in context
+                if step.file not in context_files:
+                    # Check partial matches
+                    matching = [f for f in context_files if step.file in f or f in step.file]
+                    if not matching:
+                        warnings.append(
+                            f"Step {step.order}: File '{step.file}' marked for modify "
+                            f"but not found in codebase context"
+                        )
+
+        return warnings

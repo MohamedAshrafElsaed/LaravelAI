@@ -136,12 +136,13 @@ Do not wrap in markdown code blocks.
 </output_schema>
 
 <examples>
-<example type="good">
-Input intent: "add email validation to user registration"
+<example type="good_single_chunk">
+<input>
+Intent: "add email validation to user registration"
 Chunk 0: app/Http/Controllers/UserController.php (score: 0.82)
   - Contains store() method with User::create()
-
-Output:
+</input>
+<output>
 {
   "relevant_chunks": [
     {
@@ -155,34 +156,39 @@ Output:
   "confidence_reason": "Found controller but missing FormRequest class for validation pattern",
   "coverage_gaps": ["app/Http/Requests/StoreUserRequest.php or similar validation class"]
 }
+</output>
 </example>
 
-<example type="insufficient">
-Input intent: "implement webhook for Stripe payments"
+<example type="insufficient_results">
+<input>
+Intent: "implement webhook for Stripe payments"
 Chunk 0: app/Http/Controllers/UserController.php (score: 0.65)
   - Contains user CRUD operations
 Chunk 1: app/Models/User.php (score: 0.58)
   - User model with relationships
-
-Output:
+</input>
+<output>
 {
   "relevant_chunks": [],
   "confidence": "insufficient",
   "confidence_reason": "No chunks contain Stripe, webhook, or payment-related code",
   "coverage_gaps": ["Stripe integration code", "Webhook controller or route", "Payment model or service"]
 }
+</output>
+<reasoning>High similarity scores but content is completely unrelated to Stripe/webhooks—correctly excluded all chunks.</reasoning>
 </example>
 
-<example type="filtering">
-Input intent: "fix bug in Campaign stats calculation"
+<example type="filtering_irrelevant">
+<input>
+Intent: "fix bug in Campaign stats calculation"
 Chunk 0: app/Services/CampaignStatsService.php (score: 0.78)
   - Contains calculateStats() method with aggregation logic
 Chunk 1: app/Http/Controllers/CampaignController.php (score: 0.72)
   - Generic CRUD controller, no stats logic
 Chunk 2: app/Models/Campaign.php (score: 0.68)
   - Model definition, no calculation methods
-
-Output:
+</input>
+<output>
 {
   "relevant_chunks": [
     {
@@ -196,6 +202,60 @@ Output:
   "confidence_reason": "Found stats service but may need related model scopes or database queries",
   "coverage_gaps": ["Campaign model scopes if stats uses them", "Related database queries or raw SQL"]
 }
+</output>
+<reasoning>Chunks 1 and 2 had decent scores but contained no stats calculation logic—correctly excluded.</reasoning>
+</example>
+
+<example type="high_confidence">
+<input>
+Intent: "add soft deletes to Order model"
+Chunk 0: app/Models/Order.php (score: 0.91)
+  - Order model with relationships, fillable, casts
+Chunk 1: database/migrations/2024_01_01_create_orders_table.php (score: 0.85)
+  - Orders table migration
+Chunk 2: app/Http/Controllers/Api/OrderController.php (score: 0.78)
+  - Order CRUD controller with index, store, update, destroy
+Chunk 3: app/Services/OrderService.php (score: 0.72)
+  - Business logic for orders
+Chunk 4: app/Http/Resources/OrderResource.php (score: 0.68)
+  - API resource for order responses
+Chunk 5: routes/api.php (score: 0.55)
+  - API routes including order routes
+</input>
+<output>
+{
+  "relevant_chunks": [
+    {
+      "index": 0,
+      "file_path": "app/Models/Order.php",
+      "relevance_score": 0.95,
+      "reason": "Order model where SoftDeletes trait must be added—contains current model definition"
+    },
+    {
+      "index": 1,
+      "file_path": "database/migrations/2024_01_01_create_orders_table.php",
+      "relevance_score": 0.85,
+      "reason": "Migration needs new migration for adding deleted_at column to orders table"
+    },
+    {
+      "index": 2,
+      "file_path": "app/Http/Controllers/Api/OrderController.php",
+      "relevance_score": 0.7,
+      "reason": "Controller's destroy() method may need adjustment for soft delete vs force delete"
+    },
+    {
+      "index": 4,
+      "file_path": "app/Http/Resources/OrderResource.php",
+      "relevance_score": 0.6,
+      "reason": "Resource may need to include deleted_at in response for admin views"
+    }
+  ],
+  "confidence": "high",
+  "confidence_reason": "Found model, migration, controller, and resource—comprehensive coverage for soft delete implementation",
+  "coverage_gaps": []
+}
+</output>
+<reasoning>Chunk 3 (OrderService) and Chunk 5 (routes) excluded as soft deletes don't typically require service or route changes.</reasoning>
 </example>
 </examples>"""
 

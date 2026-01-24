@@ -15,7 +15,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    nova_model: str = "opus"
+    # Agent Model Selection
+    nova_model: str = "opus"          # Intent Analyzer model
+    blueprint_model: str = "opus"   # Planner model (NEW)
+    scout_model: str = "opus"        # Context Retriever model (for future use)
+    forge_model: str = "opus"       # Executor model (for future use)
+    guardian_model: str = "opus"     # Validator model (for future use)
 
     # App
     app_name: str = "Laravel AI"
