@@ -105,7 +105,7 @@ async def github_callback(
     logger.info("[AUTH] GitHub callback received")
 
     # Exchange code for GitHub access token
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         token_response = await client.post(
             "https://github.com/login/oauth/access_token",
             data={
@@ -211,7 +211,8 @@ async def github_callback(
         personal_team = await team_service.create_personal_team(user)
 
     # Create JWT token
-    access_token = create_access_token(data={"sub": str(user.id)})
+    access_token = create_access_token(user_id=str(user.id))
+
 
     logger.info(f"[AUTH] Authentication successful for user: {user.username}")
 
@@ -327,7 +328,7 @@ async def exchange_code(
         personal_team = await team_service.create_personal_team(user)
 
     # Create JWT
-    access_token = create_access_token(data={"sub": str(user.id)})
+    access_token = create_access_token(user_id=str(user.id))
 
     return AuthResponse(
         access_token=access_token,

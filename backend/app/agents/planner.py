@@ -25,25 +25,23 @@ from typing import Optional
 from pydantic import ValidationError
 
 from app.agents.agent_identity import AgentType, get_agent
-from app.agents.intent_analyzer import Intent
+from app.agents.blueprint_system_prompt import (
+    BLUEPRINT_SYSTEM_PROMPT,
+    BLUEPRINT_USER_PROMPT,
+)
 from app.agents.context_retriever import RetrievedContext
+from app.agents.intent_analyzer import Intent
 from app.agents.plan_schema import (
     PlanOutput,
     PlanStepOutput,
     PlanReasoningOutput,
     ActionType,
     StepCategory,
-    RiskLevel,
     get_plan_json_schema,
     validate_dependency_order,
-    CATEGORY_ORDER,
 )
-from app.agents.blueprint_system_prompt import (
-    BLUEPRINT_SYSTEM_PROMPT,
-    BLUEPRINT_USER_PROMPT_TEMPLATE,
-)
-from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 from app.core.config import settings
+from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
 
@@ -279,10 +277,10 @@ class Plan:
 
     @classmethod
     def from_output(
-        cls,
-        output: PlanOutput,
-        planning_time_ms: int = 0,
-        retry_count: int = 0,
+            cls,
+            output: PlanOutput,
+            planning_time_ms: int = 0,
+            retry_count: int = 0,
     ) -> "Plan":
         """Create Plan from validated PlanOutput."""
         return cls(
@@ -301,9 +299,9 @@ class Plan:
 
     @classmethod
     def clarification_required(
-        cls,
-        questions: list[str],
-        reasoning: str = "Insufficient information to create plan",
+            cls,
+            questions: list[str],
+            reasoning: str = "Insufficient information to create plan",
     ) -> "Plan":
         """Create a Plan that requires clarification (pipeline should prompt user)."""
         return cls(
@@ -347,9 +345,9 @@ class Plan:
     def should_halt_pipeline(self) -> bool:
         """Check if pipeline should halt for clarification."""
         return (
-            self.needs_clarification or
-            self.overall_confidence < CONFIDENCE_THRESHOLD_FOR_CLARIFICATION or
-            len(self.steps) == 0
+                self.needs_clarification or
+                self.overall_confidence < CONFIDENCE_THRESHOLD_FOR_CLARIFICATION or
+                len(self.steps) == 0
         )
 
     def get_files_to_create(self) -> list[str]:
@@ -387,11 +385,11 @@ class Planner:
         logger.info(f"[{self.identity.name.upper()}] Initialized with Sonnet + Structured Outputs")
 
     def _build_user_prompt(
-        self,
-        user_input: str,
-        intent: Intent,
-        context: RetrievedContext,
-        project_context: str = "",
+            self,
+            user_input: str,
+            intent: Intent,
+            context: RetrievedContext,
+            project_context: str = "",
     ) -> str:
         """
         Build the user prompt with all context.
@@ -409,7 +407,7 @@ class Planner:
         entities = intent.entities if isinstance(intent.entities, dict) else {}
 
         return safe_format(
-            BLUEPRINT_USER_PROMPT_TEMPLATE,
+            BLUEPRINT_USER_PROMPT,
             user_input=user_input,
             task_type=intent.task_type,
             scope=intent.scope,
@@ -427,11 +425,11 @@ class Planner:
         )
 
     async def plan(
-        self,
-        user_input: str,
-        intent: Intent,
-        context: RetrievedContext,
-        project_context: str = "",
+            self,
+            user_input: str,
+            intent: Intent,
+            context: RetrievedContext,
+            project_context: str = "",
     ) -> Plan:
         """
         Create an execution plan.
@@ -483,7 +481,8 @@ class Planner:
                             order=s.order,
                             action=ActionType(s.action),
                             file=s.file,
-                            category=StepCategory(s.category) if s.category in [e.value for e in StepCategory] else StepCategory.OTHER,
+                            category=StepCategory(s.category) if s.category in [e.value for e in
+                                                                                StepCategory] else StepCategory.OTHER,
                             description=s.description,
                             depends_on=s.depends_on,
                             estimated_lines=s.estimated_lines,
@@ -591,9 +590,9 @@ class Planner:
             raise ValueError(f"Schema validation failed: {errors}")
 
     def _create_partial_plan(
-        self,
-        data: dict,
-        errors: list[str],
+            self,
+            data: dict,
+            errors: list[str],
     ) -> Optional[PlanOutput]:
         """
         Attempt to create a partial plan from invalid data.
@@ -672,10 +671,10 @@ class Planner:
         logger.info(f"[{self.identity.name.upper()}] Planning time: {plan.planning_time_ms}ms")
 
     async def refine_plan(
-        self,
-        plan: Plan,
-        feedback: str,
-        context: RetrievedContext,
+            self,
+            plan: Plan,
+            feedback: str,
+            context: RetrievedContext,
     ) -> Plan:
         """
         Refine an existing plan based on feedback.
@@ -751,9 +750,9 @@ Respond with the complete updated plan as a JSON object matching the schema."""
             return plan  # Return original plan on failure
 
     async def validate_plan_against_context(
-        self,
-        plan: Plan,
-        context: RetrievedContext,
+            self,
+            plan: Plan,
+            context: RetrievedContext,
     ) -> list[str]:
         """
         Validate that plan files exist in context where expected.

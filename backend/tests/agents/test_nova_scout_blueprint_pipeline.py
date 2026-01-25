@@ -14,29 +14,26 @@ Run with:
     # Run all scenarios
     python backend/tests/agents/test_nova_scout_blueprint_pipeline.py --run-all
 """
-import pytest
+import argparse
 import asyncio
 import json
 import sys
-import argparse
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import asdict
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.agents.intent_analyzer import IntentAnalyzer, Intent
-from app.agents.context_retriever import ContextRetriever, RetrievedContext, CodeChunk
-from app.agents.planner import Planner, Plan, PlanStep
+from app.agents.intent_analyzer import IntentAnalyzer
+from app.agents.context_retriever import ContextRetriever, RetrievedContext
+from app.agents.planner import Planner
 from app.agents.conversation_summary import ConversationSummary, RecentMessage
-from app.agents.config import agent_config
 from app.agents.exceptions import InsufficientContextError
 from app.services.vector_store import VectorStore, SearchResult
 from app.services.embeddings import EmbeddingService
-
 
 # =============================================================================
 # Sample Data
@@ -421,22 +418,22 @@ class NovaScoutBlueprintPipeline:
     """
 
     def __init__(
-        self,
-        nova: IntentAnalyzer,
-        scout: ContextRetriever,
-        blueprint: Planner,
+            self,
+            nova: IntentAnalyzer,
+            scout: ContextRetriever,
+            blueprint: Planner,
     ):
         self.nova = nova
         self.scout = scout
         self.blueprint = blueprint
 
     async def run(
-        self,
-        user_input: str,
-        project_id: str,
-        project_context: Optional[str] = None,
-        conversation_summary: Optional[ConversationSummary] = None,
-        recent_messages: Optional[List[RecentMessage]] = None,
+            self,
+            user_input: str,
+            project_id: str,
+            project_context: Optional[str] = None,
+            conversation_summary: Optional[ConversationSummary] = None,
+            recent_messages: Optional[List[RecentMessage]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Nova → Scout → Blueprint pipeline.
@@ -873,7 +870,8 @@ async def run_all_scenarios(output_file: Optional[str] = None):
 
             nova_expected = scenario.get("nova_expected", {})
             if "task_type" in nova_expected and result["intent"].task_type != nova_expected["task_type"]:
-                errors.append(f"Nova task_type: expected {nova_expected['task_type']}, got {result['intent'].task_type}")
+                errors.append(
+                    f"Nova task_type: expected {nova_expected['task_type']}, got {result['intent'].task_type}")
 
             scout_expected = scenario.get("scout_expected", {})
             if scout_expected.get("should_skip") and result["context"] is not None:

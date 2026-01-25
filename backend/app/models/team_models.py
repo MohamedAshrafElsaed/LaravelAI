@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from enum import Enum
 from uuid import uuid4
+from sqlalchemy.dialects.postgresql import UUID, ENUM
 
 from sqlalchemy import (
     String, Text, DateTime, ForeignKey, Integer, Boolean, JSON, UniqueConstraint
@@ -99,8 +100,14 @@ class TeamMember(Base):
         UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
-    role: Mapped[str] = mapped_column(String(20), default=TeamRole.MEMBER.value)
-    status: Mapped[str] = mapped_column(String(20), default=TeamMemberStatus.PENDING.value)
+    role: Mapped[str] = mapped_column(
+        ENUM('owner', 'admin', 'member', 'viewer', name='teamrole', create_type=False),
+        default=TeamRole.MEMBER.value
+    )
+    status: Mapped[str] = mapped_column(
+        ENUM('pending', 'active', 'inactive', 'declined', name='teammemberstatus', create_type=False),
+        default=TeamMemberStatus.PENDING.value
+    )
 
     permissions: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 

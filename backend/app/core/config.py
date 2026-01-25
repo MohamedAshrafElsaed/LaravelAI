@@ -48,10 +48,18 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 
-    # GitHub OAuth
+    # GitHub OAuth (for user login)
     github_client_id: str = ""
     github_client_secret: str = ""
     github_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
+
+    # GitHub App (for repo access) - ADD THESE
+    github_app_name: str = "maestroai-dev"
+    github_app_id: str = ""
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_app_private_key_path: str = ""
+    github_app_private_key: str = ""  # Base64 encoded, alternative to file path
 
     # Anthropic
     anthropic_api_key: str = ""
