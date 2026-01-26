@@ -37,6 +37,11 @@ from app.agents.exceptions import (
 from app.models.models import Project, IndexedFile
 from app.services.claude import ClaudeService, get_claude_service
 from app.services.conversation_logger import ConversationLogger
+from app.agents.conversation_summary import (
+    ConversationSummary,
+    RecentMessage,
+)
+from app.agents.orchestrator_context import ConversationContextManager
 
 logger = logging.getLogger(__name__)
 
@@ -474,12 +479,13 @@ class Orchestrator:
     """
 
     def __init__(
-        self,
-        db: AsyncSession,
-        event_callback: Optional[Callable[[ProcessEvent], Any]] = None,
-        claude_service: Optional[ClaudeService] = None,
-        conversation_logger: Optional[ConversationLogger] = None,
-        config: Optional[AgentConfig] = None,
+            self,
+            db: AsyncSession,
+            event_callback: Optional[Callable[[ProcessEvent], Any]] = None,
+            claude_service: Optional[ClaudeService] = None,
+            conversation_logger: Optional[ConversationLogger] = None,
+            config: Optional[AgentConfig] = None,
+            conversation_id: Optional[str] = None,
     ):
         """Initialize the orchestrator."""
         self.db = db
@@ -487,6 +493,12 @@ class Orchestrator:
         self.conversation_logger = conversation_logger
         self.config = config or agent_config
         self.retry_config = RetryConfig(max_attempts=self.config.MAX_FIX_ATTEMPTS)
+
+        # Conversation context management
+        self.context_manager = ConversationContextManager(db)
+        self.conversation_id = conversation_id
+        self._conversation_summary: Optional[ConversationSummary] = None
+        self._recent_messages: List[RecentMessage] = []
 
         # Initialize agents
         claude = claude_service or get_claude_service()
@@ -588,6 +600,7 @@ class Orchestrator:
         self,
         project_id: str,
         user_input: str,
+        conversation_id: Optional[str] = None,
     ) -> ProcessResult:
         """
         Process a user request through the full pipeline.
@@ -627,6 +640,22 @@ class Orchestrator:
             context.project_context = self.build_project_context(project)
             logger.info(f"[CONDUCTOR] Built project context ({len(context.project_context)} chars)")
 
+            conv_id = conversation_id or self.conversation_id
+            if conv_id:
+                self._conversation_summary, self._recent_messages = (
+                    await self.context_manager.get_context_for_agents(conv_id)
+                )
+                self._conversation_summary.project_name = project.name
+                self._conversation_summary.set_current_task(
+                    task=user_input[:200],
+                    context=context.project_context[:500] if context.project_context else None,
+                )
+                logger.info(
+                    f"[CONDUCTOR] Loaded conversation context: {len(self._recent_messages)} recent messages, "
+                    f"{self._conversation_summary.estimate_tokens()} tokens"
+                )
+
+
             # ==================================================================
             # PHASE 1: NOVA - INTENT ANALYSIS
             # ==================================================================
@@ -641,7 +670,12 @@ class Orchestrator:
             try:
                 intent = await self._execute_with_retry(
                     AgentName.NOVA,
-                    lambda: self.intent_analyzer.analyze(user_input, context.project_context),
+                    lambda: self.intent_analyzer.analyze(
+                        user_input=user_input,
+                        project_context=context.project_context,
+                        conversation_summary=self._conversation_summary,
+                        recent_messages=self._recent_messages,
+                    ),
                     metrics,
                 )
                 result.intent = intent
@@ -964,6 +998,18 @@ class Orchestrator:
                 )
                 result.events.append(event)
                 result.success = True
+
+                # Update and persist conversation context
+                conv_id = conversation_id or self.conversation_id
+                if conv_id:
+                    files_modified = [r.file for r in execution_results if r.success]
+                    await self.context_manager.update_after_execution(
+                        conversation_id=conv_id,
+                        task_completed=f"{intent.task_type}: {user_input[:100]}",
+                        files_modified=files_modified,
+                        execution_results=execution_results,
+                        new_decisions=[f"Implemented {intent.task_type}"],
+                    )
             else:
                 # Use best results if current is worse
                 if retry_state.best_score > validation.score:
@@ -1229,6 +1275,7 @@ class Orchestrator:
         self,
         project_id: str,
         question: str,
+        conversation_id: Optional[str] = None,
     ) -> Tuple[Intent, RetrievedContext, str]:
         """Process a question without code generation."""
         logger.info(f"[CONDUCTOR] Processing question for project={project_id}")
@@ -1236,7 +1283,19 @@ class Orchestrator:
         project = await self._get_project(project_id)
         project_context = self.build_project_context(project) if project else ""
 
-        intent = await self.intent_analyzer.analyze(question, project_context)
+        # Load conversation context if available
+        conv_summary = None
+        recent_msgs = []
+        conv_id = conversation_id or self.conversation_id
+        if conv_id:
+            conv_summary, recent_msgs = await self.context_manager.get_context_for_agents(conv_id)
+
+        intent = await self.intent_analyzer.analyze(
+            user_input=question,
+            project_context=project_context,
+            conversation_summary=conv_summary,
+            recent_messages=recent_msgs,
+        )
         context = await self.context_retriever.retrieve(project_id, intent)
 
         return intent, context, project_context
