@@ -384,8 +384,15 @@ def get_agent_by_name(name: str) -> Optional[AgentIdentity]:
 
 
 def get_all_agents() -> List[AgentIdentity]:
-    """Get all agent identities."""
-    return list(AGENT_REGISTRY.values())
+    """Get all agent identities, including Palette UI Designer."""
+    agents = list(AGENT_REGISTRY.values())
+    # Include Palette UI Designer agent
+    try:
+        from app.agents.ui_designer_identity import PALETTE
+        agents.append(PALETTE)
+    except ImportError:
+        pass
+    return agents
 
 
 # Thinking message pools for specific actions

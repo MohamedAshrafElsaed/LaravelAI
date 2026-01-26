@@ -17,6 +17,7 @@ from app.api import (
     health,
     teams,
     github_data,
+    ui_designer,
 )
 from app.api.github_app import router as github_app_router
 from app.core.config import settings
@@ -107,6 +108,12 @@ app.include_router(
 )
 
 app.include_router(github_app_router, prefix=f"{settings.api_prefix}/github-app", tags=["GitHub App"])
+
+app.include_router(
+    ui_designer.router,
+    prefix=f"{settings.api_prefix}/projects",
+    tags=["ui-designer"],
+)
 
 
 @app.get("/")
