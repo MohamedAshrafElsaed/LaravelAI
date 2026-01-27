@@ -458,7 +458,6 @@ CRITICAL RULES—Violation causes plan failure:
 - Respect existing patterns visible in the codebase context
 </critical_rules>"""
 
-
 # User prompt template - filled with dynamic content per request
 BLUEPRINT_USER_PROMPT = """<task_context>
 <user_request>{user_input}</user_request>

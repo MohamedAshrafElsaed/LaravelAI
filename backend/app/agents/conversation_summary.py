@@ -22,8 +22,8 @@ import logging
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Tuple
 from enum import Enum
+from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -596,9 +596,9 @@ def create_recent_message_from_history(history_item: dict) -> RecentMessage:
 
 
 def build_conversation_context(
-    summary: ConversationSummary,
-    history: List[dict],
-    max_recent: int = 4,
+        summary: ConversationSummary,
+        history: List[dict],
+        max_recent: int = 4,
 ) -> Tuple[ConversationSummary, List[RecentMessage]]:
     """
     Build complete conversation context from summary and history.

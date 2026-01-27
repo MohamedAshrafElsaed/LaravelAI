@@ -4,9 +4,9 @@ Plan Schema - Strict Pydantic models for Blueprint's structured output.
 Uses Claude's Structured Outputs feature for guaranteed schema compliance.
 Optimized for Laravel implementation planning with dependency ordering.
 """
-from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from enum import Enum
-from typing import Optional
+
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
 class ActionType(str, Enum):

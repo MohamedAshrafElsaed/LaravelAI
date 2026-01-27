@@ -9,29 +9,17 @@ Coordinates all agents with real-time visibility: analyze → retrieve → plan 
 
 UPDATED: Added step_code_chunk streaming for real-time code display.
 """
-import json
-import logging
 import asyncio
+import logging
 import random
+from dataclasses import dataclass
 from typing import Optional, Callable, Any, List, Dict
-from dataclasses import dataclass, field
-from datetime import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.intent_analyzer import IntentAnalyzer, Intent
-from app.agents.context_retriever import ContextRetriever, RetrievedContext
-from app.agents.planner import Planner, Plan, PlanStep
-from app.agents.executor import Executor, ExecutionResult
-from app.agents.validator import Validator, ValidationResult
-from app.agents.config import AgentConfig, agent_config
-from app.agents.exceptions import InsufficientContextError
-from app.agents.orchestrator import ProcessPhase, ProcessEvent, ProcessResult
 from app.agents.agent_identity import (
-    AgentType,
     AgentIdentity,
-    get_agent,
     NOVA,
     SCOUT,
     BLUEPRINT,
@@ -39,52 +27,49 @@ from app.agents.agent_identity import (
     GUARDIAN,
     CONDUCTOR,
     get_thinking_messages,
-    get_random_thinking_message,
 )
+from app.agents.config import AgentConfig, agent_config
+from app.agents.context_retriever import ContextRetriever, RetrievedContext
+from app.agents.conversation_summary import ConversationSummary, RecentMessage
 from app.agents.events import (
-    EventType,
     AgentTimelineTracker,
-    create_sse_event,
     agent_thinking,
     agent_message,
     agent_handoff,
     agent_state_change,
     intent_started,
-    intent_thinking,
     intent_analyzed,
     context_started,
-    context_thinking,
     context_chunk_found,
     context_retrieved,
     planning_started,
-    planning_thinking,
     plan_step_added,
     plan_ready,
     plan_approved,
     plan_created,
     execution_started,
     step_started,
-    step_thinking,
     step_code_chunk,
-    step_progress,
     step_completed,
     execution_completed,
     validation_started,
-    validation_thinking,
     validation_issue_found,
     validation_fix_started,
     validation_fix_completed,
     validation_result,
-    progress_update,
-    connected,
-    complete,
     error,
 )
-from app.models.models import Project, IndexedFile
+from app.agents.exceptions import InsufficientContextError
+from app.agents.executor import Executor
+from app.agents.intent_analyzer import IntentAnalyzer, Intent
+from app.agents.orchestrator import ProcessPhase, ProcessEvent, ProcessResult
+from app.agents.orchestrator_context import ConversationContextManager
+from app.agents.planner import Planner, Plan, PlanStep
+from app.agents.validator import Validator
+from app.models.models import Project
 from app.services.claude import ClaudeService, get_claude_service
 from app.services.conversation_logger import ConversationLogger
-from app.agents.conversation_summary import ConversationSummary, RecentMessage
-from app.agents.orchestrator_context import ConversationContextManager
+from app.services.file_access import FileAccessService
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +149,8 @@ class InteractiveOrchestrator:
 
         # Timeline tracker
         self.timeline = AgentTimelineTracker()
-
+        # File access service
+        self.file_access = FileAccessService(db)
         # Current active agent
         self.active_agent: Optional[AgentIdentity] = None
 
@@ -183,11 +169,11 @@ class InteractiveOrchestrator:
                 logger.error(f"[INTERACTIVE_ORCHESTRATOR] Event callback error: {e}")
 
     async def _emit_legacy_event(
-        self,
-        phase: ProcessPhase,
-        message: str,
-        progress: float,
-        data: Optional[dict] = None,
+            self,
+            phase: ProcessPhase,
+            message: str,
+            progress: float,
+            data: Optional[dict] = None,
     ) -> ProcessEvent:
         """Emit a legacy ProcessEvent for backwards compatibility."""
         event = ProcessEvent(
@@ -196,7 +182,7 @@ class InteractiveOrchestrator:
             progress=progress,
             data=data,
         )
-        logger.info(f"[INTERACTIVE_ORCHESTRATOR] {phase.value}: {message} ({progress*100:.0f}%)")
+        logger.info(f"[INTERACTIVE_ORCHESTRATOR] {phase.value}: {message} ({progress * 100:.0f}%)")
         return event
 
     async def _set_active_agent(self, agent: AgentIdentity) -> None:
@@ -219,13 +205,13 @@ class InteractiveOrchestrator:
         ))
 
     async def _emit_thinking_sequence(
-        self,
-        agent: AgentIdentity,
-        action_type: str,
-        count: int = 3,
-        delay: float = 0.8,
-        file_path: Optional[str] = None,
-        step_index: Optional[int] = None,
+            self,
+            agent: AgentIdentity,
+            action_type: str,
+            count: int = 3,
+            delay: float = 0.8,
+            file_path: Optional[str] = None,
+            step_index: Optional[int] = None,
     ) -> None:
         """Emit a sequence of thinking messages for an agent."""
         messages = get_thinking_messages(action_type)
@@ -249,10 +235,10 @@ class InteractiveOrchestrator:
             await asyncio.sleep(delay)
 
     async def _handoff(
-        self,
-        from_agent: AgentIdentity,
-        to_agent: AgentIdentity,
-        context: Optional[Dict[str, Any]] = None,
+            self,
+            from_agent: AgentIdentity,
+            to_agent: AgentIdentity,
+            context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Emit an agent handoff event."""
         message = from_agent.get_random_handoff(to_agent.name)
@@ -278,13 +264,13 @@ class InteractiveOrchestrator:
         await self._set_active_agent(to_agent)
 
     async def _stream_code_content(
-        self,
-        step_index: int,
-        file_path: str,
-        content: str,
-        action: str,
-        chunk_size: int = 150,
-        delay: float = 0.05,
+            self,
+            step_index: int,
+            file_path: str,
+            content: str,
+            action: str,
+            chunk_size: int = 150,
+            delay: float = 0.05,
     ) -> None:
         """
         Stream code content in chunks for real-time display.
@@ -333,10 +319,10 @@ class InteractiveOrchestrator:
         ))
 
     async def approve_plan(
-        self,
-        approved: bool = True,
-        modified_plan: Optional[Dict] = None,
-        rejection_reason: Optional[str] = None
+            self,
+            approved: bool = True,
+            modified_plan: Optional[Dict] = None,
+            rejection_reason: Optional[str] = None
     ) -> None:
         """
         Approve, modify, or reject the current plan.
@@ -366,10 +352,10 @@ class InteractiveOrchestrator:
         self._plan_approval_event.set()
 
     async def process_request(
-        self,
-        project_id: str,
-        user_input: str,
-        conversation_id: Optional[str] = None,
+            self,
+            project_id: str,
+            user_input: str,
+            conversation_id: Optional[str] = None,
     ) -> ProcessResult:
         """
         Process a user request with full interactive experience.
@@ -968,9 +954,9 @@ class InteractiveOrchestrator:
                         issue.message
                         for issue in validation.errors
                         if normalize_path(issue.file) == exec_file_norm
-                        or not issue.file
-                        or normalize_path(issue.file) in exec_file_norm
-                        or exec_file_norm.endswith(normalize_path(issue.file))
+                           or not issue.file
+                           or normalize_path(issue.file) in exec_file_norm
+                           or exec_file_norm.endswith(normalize_path(issue.file))
                     ]
 
                     if not file_issues:
@@ -978,10 +964,11 @@ class InteractiveOrchestrator:
 
                     if file_issues:
                         file_was_deleted = (
-                            is_critical_failure
-                            and self.config.REGENERATE_ON_DELETION
-                            and retry_count == 1
-                            and any("deleted" in issue.lower() or "entire file" in issue.lower() for issue in file_issues)
+                                is_critical_failure
+                                and self.config.REGENERATE_ON_DELETION
+                                and retry_count == 1
+                                and any(
+                            "deleted" in issue.lower() or "entire file" in issue.lower() for issue in file_issues)
                         )
 
                         if file_was_deleted:
@@ -1042,7 +1029,8 @@ class InteractiveOrchestrator:
                 result.execution_results = execution_results
 
                 if self.conversation_logger:
-                    fixed_files = [execution_results[idx].file for idx in files_to_fix if execution_results[idx].success]
+                    fixed_files = [execution_results[idx].file for idx in files_to_fix if
+                                   execution_results[idx].success]
                     self.conversation_logger.log_fix_attempt(
                         attempt_number=retry_count,
                         max_attempts=self.config.MAX_FIX_ATTEMPTS,
@@ -1169,22 +1157,17 @@ class InteractiveOrchestrator:
         return result.scalar_one_or_none()
 
     async def _get_file_content(
-        self,
-        project_id: str,
-        file_path: str,
+            self,
+            project_id: str,
+            file_path: str,
     ) -> Optional[str]:
-        """Get file content from indexed files."""
-        stmt = select(IndexedFile).where(
-            IndexedFile.project_id == project_id,
-            IndexedFile.file_path == file_path,
-        )
-        result = await self.db.execute(stmt)
-        indexed_file = result.scalar_one_or_none()
-
-        if indexed_file and indexed_file.content:
-            return indexed_file.content
-
-        return None
+        """Get file content from indexed files with filesystem fallback."""
+        try:
+            content = await self.file_access.get_file_content(project_id, file_path)
+            return content
+        except Exception as e:
+            logger.debug(f"[INTERACTIVE_ORCHESTRATOR] Error fetching file content: {e}")
+            return None
 
     def build_project_context(self, project: Project) -> str:
         """Build rich project context from scan data."""
@@ -1193,10 +1176,10 @@ class InteractiveOrchestrator:
         return Orchestrator.build_project_context(temp, project)
 
     async def process_question(
-        self,
-        project_id: str,
-        question: str,
-        conversation_id: Optional[str] = None,
+            self,
+            project_id: str,
+            question: str,
+            conversation_id: Optional[str] = None,
     ) -> tuple[Intent, RetrievedContext, str]:
         """
         Process a question (without code generation).

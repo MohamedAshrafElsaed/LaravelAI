@@ -19,6 +19,7 @@ from app.api import (
     github_data,
 )
 from app.api.github_app import router as github_app_router
+from app.api.ui_designer import router as ui_designer_router
 from app.core.config import settings
 from app.core.logging import setup_logging, RequestLoggingMiddleware
 
@@ -107,6 +108,13 @@ app.include_router(
 )
 
 app.include_router(github_app_router, prefix=f"{settings.api_prefix}/github-app", tags=["GitHub App"])
+
+# UI Designer routes (Palette agent)
+app.include_router(
+    ui_designer_router,
+    prefix=f"{settings.api_prefix}/projects",
+    tags=["ui-designer"],
+)
 
 
 @app.get("/")

@@ -1,9 +1,8 @@
 """
 Agent Configuration - Centralized settings for all agents.
 """
-from dataclasses import dataclass
-from typing import Optional
 import os
+from dataclasses import dataclass
 
 
 @dataclass

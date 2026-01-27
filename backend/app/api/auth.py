@@ -183,7 +183,7 @@ async def github_callback(
         user.username = github_user["login"]
         user.email = email
         user.avatar_url = github_user.get("avatar_url")
-        user.github_token_encrypted = encrypt_token(github_token)
+        user.github_access_token = encrypt_token(github_token)
         user.github_token_expires_at = datetime.utcnow() + timedelta(hours=8)
         user.updated_at = datetime.utcnow()
     else:
@@ -194,7 +194,7 @@ async def github_callback(
             username=github_user["login"],
             email=email,
             avatar_url=github_user.get("avatar_url"),
-            github_token_encrypted=encrypt_token(github_token),
+            github_access_token=encrypt_token(github_token),
             github_token_expires_at=datetime.utcnow() + timedelta(hours=8),
         )
         db.add(user)
@@ -303,7 +303,7 @@ async def exchange_code(
         user.username = github_user["login"]
         user.email = email
         user.avatar_url = github_user.get("avatar_url")
-        user.github_token_encrypted = encrypt_token(github_token)
+        user.github_access_token = encrypt_token(github_token)
         user.github_token_expires_at = datetime.utcnow() + timedelta(hours=8)
         user.updated_at = datetime.utcnow()
     else:
@@ -312,7 +312,7 @@ async def exchange_code(
             username=github_user["login"],
             email=email,
             avatar_url=github_user.get("avatar_url"),
-            github_token_encrypted=encrypt_token(github_token),
+            github_access_token=encrypt_token(github_token),
             github_token_expires_at=datetime.utcnow() + timedelta(hours=8),
         )
         db.add(user)

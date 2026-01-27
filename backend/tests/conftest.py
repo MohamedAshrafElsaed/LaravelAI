@@ -1,22 +1,24 @@
 """
-Pytest Configuration and Shared Fixtures for Agent Tests
+Pytest Configuration and Shared Fixtures for All Tests
 
 This conftest.py provides:
 - Shared fixtures for all agent tests
+- TestClient and mock database fixtures for API tests
+- Authentication fixtures (test users, auth headers)
 - Mock factories for services
 - Sample data generators
 - Test markers configuration
-
-Place this file in: backend/tests/agents/conftest.py
 """
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -36,6 +38,505 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "unit: marks tests as unit tests (mocked, fast)"
     )
+
+
+# =============================================================================
+# API Test Fixtures - TestClient & Database
+# =============================================================================
+
+@pytest.fixture
+def client():
+    """Create a test client for the FastAPI app."""
+    from main import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def client_with_mocked_db(mock_db_async, test_user):
+    """TestClient with mocked database and authenticated user."""
+    from main import app
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    async def mock_get_db():
+        yield mock_db_async
+
+    async def mock_get_current_user():
+        return test_user
+
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+
+    yield TestClient(app)
+
+    # Cleanup
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_db_async():
+    """Create a mock async database session with common query patterns."""
+    mock = MagicMock()
+    mock.execute = AsyncMock()
+    mock.commit = AsyncMock()
+    mock.refresh = AsyncMock()
+    mock.delete = AsyncMock()
+    mock.add = MagicMock()
+    mock.rollback = AsyncMock()
+
+    # Default execute returns empty result
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none = MagicMock(return_value=None)
+    mock_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    mock_result.fetchall = MagicMock(return_value=[])
+    mock.execute.return_value = mock_result
+
+    return mock
+
+
+# =============================================================================
+# Authentication Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_user():
+    """Create a sample User model instance for testing."""
+    from app.models.models import User
+
+    user = MagicMock(spec=User)
+    user.id = str(uuid4())
+    user.github_id = 12345678
+    user.username = "testuser"
+    user.email = "testuser@example.com"
+    user.avatar_url = "https://avatars.githubusercontent.com/u/12345678"
+    user.github_access_token = "encrypted_test_token"
+    user.github_refresh_token = None
+    user.github_token_expires_at = datetime.utcnow() + timedelta(hours=8)
+    user.is_active = True
+    user.monthly_requests = 0
+    user.request_limit = 100
+    user.created_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
+    return user
+
+
+@pytest.fixture
+def test_user_second():
+    """Create a second test user for access control tests."""
+    from app.models.models import User
+
+    user = MagicMock(spec=User)
+    user.id = str(uuid4())
+    user.github_id = 87654321
+    user.username = "otheruser"
+    user.email = "other@example.com"
+    user.avatar_url = "https://avatars.githubusercontent.com/u/87654321"
+    user.github_access_token = "encrypted_other_token"
+    user.is_active = True
+    user.created_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
+    return user
+
+
+@pytest.fixture
+def auth_headers(test_user):
+    """Generate JWT auth headers for authenticated requests."""
+    from app.core.security import create_access_token
+
+    token = create_access_token(user_id=test_user.id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def mock_current_user(test_user):
+    """Override get_current_user dependency to return test user."""
+    from main import app
+    from app.core.security import get_current_user
+
+    async def override_get_current_user():
+        return test_user
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    yield test_user
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+# =============================================================================
+# Project Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_project(test_user):
+    """Create a sample Project model instance."""
+    from app.models.models import Project, ProjectStatus
+
+    project = MagicMock(spec=Project)
+    project.id = str(uuid4())
+    project.user_id = test_user.id
+    project.github_repo_id = 123456789
+    project.name = "test-laravel-app"
+    project.repo_full_name = "testuser/test-laravel-app"
+    project.repo_url = "https://github.com/testuser/test-laravel-app"
+    project.default_branch = "main"
+    project.clone_path = "/tmp/repos/test-project"
+    project.status = ProjectStatus.READY.value
+    project.last_indexed_at = datetime.utcnow()
+    project.indexed_files_count = 150
+    project.error_message = None
+    project.laravel_version = "11.0"
+    project.php_version = "8.3"
+    project.stack = {"backend": {"framework": "laravel", "version": "11.0"}}
+    project.file_stats = {"total_files": 150, "total_lines": 15000}
+    project.health_score = 85.0
+    project.health_check = {"score": 85.0, "production_ready": True}
+    project.scan_progress = 100
+    project.scanned_at = datetime.utcnow()
+    project.created_at = datetime.utcnow()
+    project.updated_at = datetime.utcnow()
+    project.team_id = None
+    return project
+
+
+@pytest.fixture
+def test_project_not_ready(test_user):
+    """Create a project in CLONING status."""
+    from app.models.models import Project, ProjectStatus
+
+    project = MagicMock(spec=Project)
+    project.id = str(uuid4())
+    project.user_id = test_user.id
+    project.github_repo_id = 987654321
+    project.name = "cloning-project"
+    project.repo_full_name = "testuser/cloning-project"
+    project.repo_url = "https://github.com/testuser/cloning-project"
+    project.default_branch = "main"
+    project.clone_path = None
+    project.status = ProjectStatus.CLONING.value
+    project.last_indexed_at = None
+    project.indexed_files_count = 0
+    project.error_message = None
+    project.created_at = datetime.utcnow()
+    project.updated_at = datetime.utcnow()
+    return project
+
+
+# =============================================================================
+# Team Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_team(test_user):
+    """Create a sample Team model instance."""
+    from app.models.team_models import Team
+
+    team = MagicMock(spec=Team)
+    team.id = str(uuid4())
+    team.name = "Test Team"
+    team.slug = "test-team"
+    team.description = "A test team"
+    team.avatar_url = None
+    team.owner_id = test_user.id
+    team.is_personal = False
+    team.github_org_name = None
+    team.settings = {}
+    team.created_at = datetime.utcnow()
+    team.updated_at = datetime.utcnow()
+    return team
+
+
+@pytest.fixture
+def test_personal_team(test_user):
+    """Create a personal team for the test user."""
+    from app.models.team_models import Team
+
+    team = MagicMock(spec=Team)
+    team.id = str(uuid4())
+    team.name = f"{test_user.username}'s Personal Team"
+    team.slug = f"{test_user.username}-personal"
+    team.description = None
+    team.avatar_url = test_user.avatar_url
+    team.owner_id = test_user.id
+    team.is_personal = True
+    team.github_org_name = None
+    team.settings = {}
+    team.created_at = datetime.utcnow()
+    team.updated_at = datetime.utcnow()
+    return team
+
+
+@pytest.fixture
+def test_team_member(test_team, test_user):
+    """Create a sample TeamMember instance."""
+    from app.models.team_models import TeamMember, TeamRole, TeamMemberStatus
+
+    member = MagicMock(spec=TeamMember)
+    member.id = str(uuid4())
+    member.team_id = test_team.id
+    member.user_id = test_user.id
+    member.github_id = test_user.github_id
+    member.github_username = test_user.username
+    member.github_avatar_url = test_user.avatar_url
+    member.invited_email = None
+    member.role = TeamRole.OWNER.value
+    member.status = TeamMemberStatus.ACTIVE.value
+    member.joined_at = datetime.utcnow()
+    member.invited_at = datetime.utcnow()
+    member.last_active_at = datetime.utcnow()
+    return member
+
+
+# =============================================================================
+# Conversation Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_conversation(test_user, test_project):
+    """Create a sample Conversation instance."""
+    from app.models.models import Conversation
+
+    conv = MagicMock(spec=Conversation)
+    conv.id = str(uuid4())
+    conv.user_id = test_user.id
+    conv.project_id = test_project.id
+    conv.title = "Test conversation"
+    conv.created_at = datetime.utcnow()
+    conv.updated_at = datetime.utcnow()
+    conv.messages = []
+    return conv
+
+
+@pytest.fixture
+def test_message(test_conversation):
+    """Create a sample Message instance."""
+    from app.models.models import Message
+
+    msg = MagicMock(spec=Message)
+    msg.id = str(uuid4())
+    msg.conversation_id = test_conversation.id
+    msg.role = "user"
+    msg.content = "Test message content"
+    msg.code_changes = None
+    msg.tokens_used = 100
+    msg.processing_data = None
+    msg.created_at = datetime.utcnow()
+    return msg
+
+
+# =============================================================================
+# Git Change Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_git_change(test_project, test_conversation):
+    """Create a sample GitChange instance."""
+    from app.models.models import GitChange, GitChangeStatus
+
+    change = MagicMock(spec=GitChange)
+    change.id = str(uuid4())
+    change.conversation_id = test_conversation.id
+    change.project_id = test_project.id
+    change.message_id = None
+    change.branch_name = "ai-changes/20240115-abc123"
+    change.base_branch = "main"
+    change.commit_hash = "abc123def456"
+    change.status = GitChangeStatus.PENDING.value
+    change.pr_number = None
+    change.pr_url = None
+    change.pr_state = None
+    change.title = "Add user export feature"
+    change.description = "Implements CSV export for users"
+    change.files_changed = [
+        {"file": "app/Http/Controllers/UserController.php", "action": "modify"}
+    ]
+    change.change_summary = "Added export method to UserController"
+    change.rollback_commit = None
+    change.rolled_back_at = None
+    change.rolled_back_from_status = None
+    change.created_at = datetime.utcnow()
+    change.updated_at = datetime.utcnow()
+    change.applied_at = None
+    change.pushed_at = None
+    change.pr_created_at = None
+    change.merged_at = None
+    return change
+
+
+# =============================================================================
+# Service Mock Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_github_service():
+    """Create a mocked GitHub service with PyGithub."""
+    mock = MagicMock()
+    mock.get_user = MagicMock()
+    mock.get_repo = MagicMock()
+    return mock
+
+
+@pytest.fixture
+def mock_github_token_service():
+    """Mock the github_token_service functions."""
+    with patch('app.services.github_token_service.ensure_valid_token') as mock_ensure, \
+         patch('app.services.github_token_service.handle_auth_failure') as mock_handle:
+        mock_ensure.return_value = AsyncMock(return_value="valid_github_token")
+        mock_handle.return_value = AsyncMock(return_value="refreshed_token")
+        yield {
+            "ensure_valid_token": mock_ensure,
+            "handle_auth_failure": mock_handle,
+        }
+
+
+@pytest.fixture
+def mock_team_service():
+    """Create a mocked TeamService."""
+    mock = MagicMock()
+    mock.get_team = AsyncMock(return_value=None)
+    mock.get_user_teams = AsyncMock(return_value=[])
+    mock.get_user_personal_team = AsyncMock(return_value=None)
+    mock.get_team_members = AsyncMock(return_value=[])
+    mock.get_team_projects = AsyncMock(return_value=[])
+    mock.create_team = AsyncMock()
+    mock.create_personal_team = AsyncMock()
+    mock.add_member = AsyncMock()
+    mock.remove_member = AsyncMock()
+    mock.update_member_role = AsyncMock()
+    mock.check_team_access = AsyncMock(return_value=True)
+    mock.check_project_access = AsyncMock(return_value=True)
+    mock.assign_project_to_team = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_git_service():
+    """Create a mocked GitService."""
+    mock = MagicMock()
+    mock.clone_repo = MagicMock(return_value="/tmp/repos/test-project")
+    mock.list_branches = MagicMock(return_value=[
+        {"name": "main", "is_current": True, "commit": "abc123", "message": "Initial commit", "author": "testuser", "date": "2024-01-15"},
+        {"name": "feature/test", "is_current": False, "commit": "def456", "message": "Add feature", "author": "testuser", "date": "2024-01-14"},
+    ])
+    mock.create_branch = MagicMock()
+    mock.checkout_branch = MagicMock()
+    mock.apply_changes = MagicMock(return_value="abc123def456")
+    mock.push_branch = MagicMock()
+    mock.create_pull_request = AsyncMock(return_value={
+        "number": 1,
+        "url": "https://github.com/testuser/test-repo/pull/1",
+        "title": "Test PR",
+        "state": "open",
+        "created_at": datetime.utcnow().isoformat(),
+    })
+    mock.pull_latest = MagicMock(return_value=True)
+    mock.reset_to_remote = MagicMock()
+    mock.get_diff = MagicMock(return_value="diff content")
+    mock.get_changed_files = MagicMock(return_value=["file1.php", "file2.php"])
+    mock.get_current_branch = MagicMock(return_value="main")
+    return mock
+
+
+@pytest.fixture
+def mock_orchestrator():
+    """Create a mocked Orchestrator for chat tests."""
+    from app.agents.orchestrator import ProcessResult
+
+    mock = MagicMock()
+    mock.process_request = AsyncMock(return_value=ProcessResult(
+        success=True,
+        intent=None,
+        plan=None,
+        execution_results=[],
+        validation=None,
+        events=[],
+        error=None,
+    ))
+    mock.process_question = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_usage_tracker():
+    """Create a mocked UsageTracker."""
+    mock = MagicMock()
+    mock.get_user_summary = AsyncMock(return_value={
+        "summary": {
+            "total_requests": 100,
+            "total_input_tokens": 50000,
+            "total_output_tokens": 30000,
+            "total_tokens": 80000,
+            "total_cost": 1.50,
+        },
+        "by_provider": {"claude": {"requests": 100, "tokens": 80000, "cost": 1.50}},
+        "by_model": {"claude-sonnet": {"provider": "claude", "requests": 100, "tokens": 80000, "cost": 1.50}},
+        "today": {"requests": 10, "cost": 0.15},
+        "period": {"start": "2024-01-01", "end": "2024-01-15"},
+    })
+    mock.get_daily_breakdown = AsyncMock(return_value=[])
+    mock.get_usage_history = AsyncMock(return_value={
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "limit": 50,
+        "pages": 0,
+    })
+    mock.get_project_summary = AsyncMock(return_value={
+        "project_id": "test-id",
+        "total_requests": 50,
+        "total_input_tokens": 25000,
+        "total_output_tokens": 15000,
+        "total_cost": 0.75,
+        "by_request_type": {},
+        "period": {"start": "2024-01-01", "end": "2024-01-15"},
+    })
+    mock.update_summary = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_github_sync_service():
+    """Create a mocked GitHubSyncService."""
+    mock = MagicMock()
+    mock.sync_issues = AsyncMock(return_value=[])
+    mock.sync_actions = AsyncMock(return_value=[])
+    mock.sync_projects = AsyncMock(return_value=[])
+    mock.sync_insights = AsyncMock()
+    mock.sync_collaborators = AsyncMock(return_value=[])
+    mock.full_sync = AsyncMock(return_value={
+        "collaborators": [],
+        "issues": [],
+        "actions": [],
+        "projects": [],
+        "insights": None,
+        "errors": [],
+    })
+    return mock
+
+
+@pytest.fixture
+def mock_github_app_service():
+    """Create a mocked GitHubAppService."""
+    mock = MagicMock()
+    mock.get_user_installation = AsyncMock(return_value=None)
+    mock.save_installation = AsyncMock()
+    mock._generate_jwt = MagicMock(return_value="mock_jwt_token")
+    return mock
+
+
+@pytest.fixture
+def mock_ui_designer():
+    """Create a mocked UIDesigner agent."""
+    mock = MagicMock()
+    mock.design = AsyncMock()
+    mock.design_streaming = MagicMock()
+    return mock
+
+
+@pytest.fixture
+def mock_frontend_detector():
+    """Create a mocked FrontendDetector service."""
+    mock = MagicMock()
+    mock.detect = AsyncMock()
+    return mock
 
 
 # =============================================================================
@@ -350,10 +851,10 @@ def sample_plan_step():
 
     return PlanStep(
         order=1,
-        action="modify",
+        action="create",
         file="app/Http/Controllers/UserController.php",
         category="controller",
-        description="Add export method to generate CSV",
+        description="Create UserController with export method",
         depends_on=[],
         estimated_lines=30,
     )
@@ -462,8 +963,15 @@ def blueprint_response_factory():
         if needs_clarification:
             return json.dumps({
                 "summary": "Need clarification",
-                "reasoning": {},
-                "steps": [],
+                "reasoning": {
+                    "understanding": "Request unclear",
+                    "approach": "Need more information",
+                    "dependency_analysis": "Cannot determine dependencies without clarity",
+                    "risks_considered": "High risk due to ambiguity",
+                },
+                "steps": [
+                    {"order": 1, "action": "modify", "file": "unknown.php", "category": "other", "description": "Placeholder until clarified", "depends_on": [], "estimated_lines": 1}
+                ],
                 "overall_confidence": 0.2,
                 "risk_level": "medium",
                 "estimated_complexity": 1,
@@ -489,6 +997,8 @@ def blueprint_response_factory():
             "reasoning": {
                 "understanding": "Test understanding",
                 "approach": "Standard approach",
+                "dependency_analysis": "Steps ordered by dependency",
+                "risks_considered": "Low risk - standard implementation",
             },
             "steps": default_steps,
             "overall_confidence": confidence,
@@ -620,3 +1130,337 @@ def generate_code_chunks():
             )
         return chunks
     return generate
+
+
+# =============================================================================
+# Agent Logging Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_log_dir(tmp_path):
+    """
+    Temporary directory for test logs.
+
+    Creates a unique directory for each test run that persists
+    during the test for inspection.
+    """
+    log_dir = tmp_path / "test_logs"
+    log_dir.mkdir(exist_ok=True)
+    return log_dir
+
+
+@pytest.fixture
+def agent_logger(test_log_dir, request):
+    """
+    Create AgentLogger for current test with auto-report save.
+
+    Automatically generates reports at the end of the test.
+    The test name is used to identify the log run.
+    """
+    from tests.agents.logging import AgentLogger
+
+    test_name = request.node.name
+    logger = AgentLogger(
+        log_dir=test_log_dir,
+        test_name=test_name,
+        save_prompts=True,
+        save_responses=True,
+        verbose=False,
+    )
+
+    yield logger
+
+    # Auto-generate reports after test
+    try:
+        logger.generate_report()
+    except Exception:
+        pass  # Don't fail test if report generation fails
+
+
+@pytest.fixture
+def agent_logger_verbose(test_log_dir, request):
+    """
+    Create AgentLogger with verbose output enabled.
+
+    Useful for debugging test failures.
+    """
+    from tests.agents.logging import AgentLogger
+
+    test_name = request.node.name
+    logger = AgentLogger(
+        log_dir=test_log_dir,
+        test_name=test_name,
+        save_prompts=True,
+        save_responses=True,
+        verbose=True,
+    )
+
+    yield logger
+
+    try:
+        logger.generate_report()
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def instrumented_claude(mock_claude_service, agent_logger):
+    """
+    ClaudeService wrapped with full logging instrumentation.
+
+    Intercepts all Claude API calls and logs prompts, responses,
+    timing, and token metrics.
+    """
+    from tests.agents.logging import InstrumentedClaudeService
+
+    return InstrumentedClaudeService(
+        claude_service=mock_claude_service,
+        agent_logger=agent_logger,
+        default_agent="TEST",
+    )
+
+
+@pytest.fixture
+def instrumented_mock_claude(agent_logger):
+    """
+    Create an instrumented mock Claude service with response tracking.
+
+    Provides a mock service that simulates Claude responses while
+    capturing all calls for logging.
+    """
+    from tests.agents.logging.instrumented_claude import (
+        MockClaudeServiceWithUsage,
+        InstrumentedClaudeService,
+    )
+
+    mock_service = MockClaudeServiceWithUsage(
+        default_response="Mock response from Claude",
+        simulate_tokens=True,
+    )
+
+    return InstrumentedClaudeService(
+        claude_service=mock_service,
+        agent_logger=agent_logger,
+        default_agent="TEST",
+    )
+
+
+@pytest.fixture
+def subscription_management_scenario():
+    """
+    The main test scenario with full Stripe integration.
+
+    Returns the complete subscription management scenario
+    including user input, expected flow, and mock responses.
+    """
+    from tests.agents.fixtures.scenarios import SUBSCRIPTION_SCENARIO
+    return SUBSCRIPTION_SCENARIO
+
+
+@pytest.fixture
+def simple_crud_scenario():
+    """Simple CRUD test scenario for basic feature tests."""
+    from tests.agents.fixtures.scenarios import SIMPLE_CRUD_SCENARIO
+    return SIMPLE_CRUD_SCENARIO
+
+
+@pytest.fixture
+def bug_fix_scenario():
+    """Bug fix test scenario."""
+    from tests.agents.fixtures.scenarios import BUG_FIX_SCENARIO
+    return BUG_FIX_SCENARIO
+
+
+@pytest.fixture
+def refactor_scenario():
+    """Refactoring test scenario."""
+    from tests.agents.fixtures.scenarios import REFACTOR_SCENARIO
+    return REFACTOR_SCENARIO
+
+
+@pytest.fixture
+def mock_search_results_subscription():
+    """
+    Mock vector search results for subscription scenario.
+
+    Returns search results that match the subscription management
+    scenario's expected context.
+    """
+    from app.services.vector_store import SearchResult
+
+    return [
+        SearchResult(
+            chunk_id="user-model-1",
+            file_path="app/Models/User.php",
+            content=r"""<?php
+
+namespace App\Models;
+
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class User extends Authenticatable
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+    ];
+
+    public function team()
+    {
+        return $this->belongsTo(Team::class);
+    }
+
+    public function projects()
+    {
+        return $this->hasMany(Project::class);
+    }
+}""",
+            chunk_type="class",
+            score=0.92,
+            metadata={"laravel_type": "model", "lines": "1-28"},
+        ),
+        SearchResult(
+            chunk_id="api-routes-1",
+            file_path="routes/api.php",
+            content=r"""<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\TeamController;
+
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::get('/user', [AuthController::class, 'user']);
+    Route::apiResource('projects', ProjectController::class);
+    Route::apiResource('teams', TeamController::class);
+});""",
+            chunk_type="routes",
+            score=0.88,
+            metadata={"laravel_type": "routes", "lines": "1-14"},
+        ),
+        SearchResult(
+            chunk_id="base-controller-1",
+            file_path="app/Http/Controllers/Controller.php",
+            content=r"""<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Foundation\Validation\ValidatesRequests;
+use Illuminate\Routing\Controller as BaseController;
+
+class Controller extends BaseController
+{
+    use AuthorizesRequests, ValidatesRequests;
+
+    protected function success($data = null, string $message = 'Success', int $status = 200)
+    {
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => $data,
+        ], $status);
+    }
+
+    protected function error(string $message, int $status = 400)
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], $status);
+    }
+}""",
+            chunk_type="class",
+            score=0.85,
+            metadata={"laravel_type": "controller", "lines": "1-30"},
+        ),
+    ]
+
+
+@pytest.fixture
+def logged_nova(agent_logger, nova_response_factory):
+    """
+    Create a Nova agent with instrumented logging.
+
+    Uses mock responses but logs all interactions.
+    """
+    from tests.agents.logging.instrumented_claude import (
+        MockClaudeServiceWithUsage,
+        InstrumentedClaudeService,
+    )
+    from app.agents.intent_analyzer import IntentAnalyzer
+
+    mock_service = MockClaudeServiceWithUsage(
+        responses={
+            "intent": nova_response_factory(
+                task_type="feature",
+                domains=["controllers", "models", "services"],
+            ),
+        },
+    )
+
+    instrumented = InstrumentedClaudeService(
+        claude_service=mock_service,
+        agent_logger=agent_logger,
+        default_agent="NOVA",
+    )
+
+    return IntentAnalyzer(claude_service=instrumented)
+
+
+@pytest.fixture
+def logged_blueprint(agent_logger, blueprint_response_factory):
+    """
+    Create a Blueprint agent with instrumented logging.
+    """
+    from tests.agents.logging.instrumented_claude import (
+        MockClaudeServiceWithUsage,
+        InstrumentedClaudeService,
+    )
+    from app.agents.planner import Planner
+
+    mock_service = MockClaudeServiceWithUsage(
+        responses={
+            "planning": blueprint_response_factory(),
+        },
+    )
+
+    instrumented = InstrumentedClaudeService(
+        claude_service=mock_service,
+        agent_logger=agent_logger,
+        default_agent="BLUEPRINT",
+    )
+
+    return Planner(claude_service=instrumented)
+
+
+@pytest.fixture
+def logged_forge(agent_logger, forge_response_factory, reasoning_response_factory, verification_response_factory):
+    """
+    Create a Forge agent with instrumented logging.
+    """
+    from tests.agents.logging.instrumented_claude import (
+        MockClaudeServiceWithUsage,
+        InstrumentedClaudeService,
+    )
+    from app.agents.executor import Executor
+
+    mock_service = MockClaudeServiceWithUsage(
+        responses={
+            "reasoning": reasoning_response_factory(),
+            "code": forge_response_factory(),
+            "verification": verification_response_factory(),
+        },
+    )
+
+    instrumented = InstrumentedClaudeService(
+        claude_service=mock_service,
+        agent_logger=agent_logger,
+        default_agent="FORGE",
+    )
+
+    return Executor(claude_service=instrumented)

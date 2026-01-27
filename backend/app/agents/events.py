@@ -71,6 +71,18 @@ class EventType(str, Enum):
     # Progress Events
     PROGRESS_UPDATE = "progress_update"  # General progress update
 
+    # UI Design Events (Palette)
+    DESIGN_STARTED = "design_started"  # Palette starts designing
+    DESIGN_THINKING = "design_thinking"  # Palette's thinking process
+    TECH_DETECTED = "tech_detected"  # Frontend technology detected
+    PROMPT_OPTIMIZED = "prompt_optimized"  # Prompt has been optimized
+    GENERATION_STARTED = "generation_started"  # Code generation begins
+    COMPONENT_STARTED = "component_started"  # Starting a component
+    CODE_CHUNK = "code_chunk"  # Streaming code chunk
+    FILE_READY = "file_ready"  # A file has been generated
+    DESIGN_COMPLETE = "design_complete"  # UI design finished
+    DESIGN_CANCELLED = "design_cancelled"  # Design was cancelled
+
 
 @dataclass
 class SSEEvent:

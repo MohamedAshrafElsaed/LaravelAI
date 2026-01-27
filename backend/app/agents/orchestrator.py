@@ -10,38 +10,37 @@ ENHANCEMENTS:
 - Group C: Observability metrics and performance tracking
 - Group D: Progressive context accumulation
 """
+import asyncio
 import json
 import logging
-import asyncio
 import time
-from typing import Optional, Callable, Any, List, Dict, Set, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Optional, Callable, Any, List, Dict, Set, Tuple
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.intent_analyzer import IntentAnalyzer, Intent
-from app.agents.context_retriever import ContextRetriever, RetrievedContext
-from app.agents.planner import Planner, Plan, PlanStep
-from app.agents.executor import Executor, ExecutionResult
-from app.agents.validator import Validator, ValidationResult, ValidationIssue
 from app.agents.config import AgentConfig, agent_config
-from app.agents.exceptions import (
-    InsufficientContextError,
-    AgentException,
-    ValidationDegradationError,
-)
-from app.models.models import Project, IndexedFile
-from app.services.claude import ClaudeService, get_claude_service
-from app.services.conversation_logger import ConversationLogger
+from app.agents.context_retriever import ContextRetriever, RetrievedContext
 from app.agents.conversation_summary import (
     ConversationSummary,
     RecentMessage,
 )
+from app.agents.exceptions import (
+    InsufficientContextError,
+)
+from app.agents.executor import Executor, ExecutionResult
+from app.agents.intent_analyzer import IntentAnalyzer, Intent
 from app.agents.orchestrator_context import ConversationContextManager
+from app.agents.planner import Planner, Plan
+from app.agents.validator import Validator, ValidationResult, ValidationIssue
+from app.models.models import Project
+from app.services.claude import ClaudeService, get_claude_service
+from app.services.conversation_logger import ConversationLogger
+from app.services.file_access import FileAccessService
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +510,9 @@ class Orchestrator:
         # Request counter for metrics
         self._request_counter = 0
 
+        # File access service
+        self.file_access = FileAccessService(db)
+
         tracking_info = "with tracking" if (claude_service and claude_service.tracker) else "without tracking"
         logging_info = "with conversation logging" if conversation_logger else "without conversation logging"
         logger.info(f"[CONDUCTOR] Initialized with enhanced orchestration ({tracking_info}, {logging_info})")
@@ -520,13 +522,13 @@ class Orchestrator:
     # =========================================================================
 
     async def _emit_event(
-        self,
-        phase: ProcessPhase,
-        message: str,
-        progress: float,
-        data: Optional[dict] = None,
-        agent: Optional[str] = None,
-        metrics: Optional[dict] = None,
+            self,
+            phase: ProcessPhase,
+            message: str,
+            progress: float,
+            data: Optional[dict] = None,
+            agent: Optional[str] = None,
+            metrics: Optional[dict] = None,
     ) -> ProcessEvent:
         """Emit a processing event."""
         event = ProcessEvent(
@@ -538,7 +540,7 @@ class Orchestrator:
             metrics=metrics,
         )
 
-        logger.info(f"[CONDUCTOR] {phase.value}: {message} ({progress*100:.0f}%)")
+        logger.info(f"[CONDUCTOR] {phase.value}: {message} ({progress * 100:.0f}%)")
 
         if self.event_callback:
             try:
@@ -566,11 +568,11 @@ class Orchestrator:
             raise
 
     async def _execute_with_retry(
-        self,
-        agent: AgentName,
-        operation: Callable,
-        metrics: PipelineMetrics,
-        max_retries: int = 2,
+            self,
+            agent: AgentName,
+            operation: Callable,
+            metrics: PipelineMetrics,
+            max_retries: int = 2,
     ) -> Any:
         """Execute an agent operation with retry logic."""
         last_error = None
@@ -585,10 +587,11 @@ class Orchestrator:
                 last_error = e
                 if attempt < max_retries:
                     delay = self.retry_config.base_delay * (2 ** attempt)
-                    logger.warning(f"[CONDUCTOR] {agent.value} failed (attempt {attempt+1}), retrying in {delay}s: {e}")
+                    logger.warning(
+                        f"[CONDUCTOR] {agent.value} failed (attempt {attempt + 1}), retrying in {delay}s: {e}")
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(f"[CONDUCTOR] {agent.value} failed after {max_retries+1} attempts: {e}")
+                    logger.error(f"[CONDUCTOR] {agent.value} failed after {max_retries + 1} attempts: {e}")
 
         raise last_error
 
@@ -597,10 +600,10 @@ class Orchestrator:
     # =========================================================================
 
     async def process_request(
-        self,
-        project_id: str,
-        user_input: str,
-        conversation_id: Optional[str] = None,
+            self,
+            project_id: str,
+            user_input: str,
+            conversation_id: Optional[str] = None,
     ) -> ProcessResult:
         """
         Process a user request through the full pipeline.
@@ -654,7 +657,6 @@ class Orchestrator:
                     f"[CONDUCTOR] Loaded conversation context: {len(self._recent_messages)} recent messages, "
                     f"{self._conversation_summary.estimate_tokens()} tokens"
                 )
-
 
             # ==================================================================
             # PHASE 1: NOVA - INTENT ANALYSIS
@@ -982,7 +984,8 @@ class Orchestrator:
                 if self.conversation_logger:
                     self.conversation_logger.log_validation(validation.to_dict())
 
-                logger.info(f"[CONDUCTOR] Retry {retry_state.attempt}: score={validation.score}, approved={validation.approved}")
+                logger.info(
+                    f"[CONDUCTOR] Retry {retry_state.attempt}: score={validation.score}, approved={validation.approved}")
 
             metrics.complete_phase(ProcessPhase.VALIDATING.value)
 
@@ -1053,11 +1056,11 @@ class Orchestrator:
     # =========================================================================
 
     async def _smart_fix(
-        self,
-        execution_results: List[ExecutionResult],
-        validation: ValidationResult,
-        context: AccumulatedContext,
-        retry_state: RetryState,
+            self,
+            execution_results: List[ExecutionResult],
+            validation: ValidationResult,
+            context: AccumulatedContext,
+            retry_state: RetryState,
     ) -> List[ExecutionResult]:
         """
         Intelligent fix strategy that:
@@ -1166,14 +1169,13 @@ class Orchestrator:
         return result.scalar_one_or_none()
 
     async def _get_file_content(self, project_id: str, file_path: str) -> Optional[str]:
-        """Get file content from indexed files."""
-        stmt = select(IndexedFile).where(
-            IndexedFile.project_id == project_id,
-            IndexedFile.file_path == file_path,
-        )
-        result = await self.db.execute(stmt)
-        indexed_file = result.scalar_one_or_none()
-        return indexed_file.content if indexed_file else None
+        """Get file content from indexed files with filesystem fallback."""
+        try:
+            content = await self.file_access.get_file_content(project_id, file_path)
+            return content
+        except Exception as e:
+            logger.debug(f"[CONDUCTOR] Error fetching file content: {e}")
+            return None
 
     # =========================================================================
     # PROJECT CONTEXT BUILDER
@@ -1220,7 +1222,8 @@ class Orchestrator:
 
                 frontend = safe_get(stack, "frontend", {})
                 if isinstance(frontend, dict) and frontend:
-                    parts.append(f"- **Frontend:** {safe_get(frontend, 'framework', '')} {safe_get(frontend, 'version', '')}".strip())
+                    parts.append(
+                        f"- **Frontend:** {safe_get(frontend, 'framework', '')} {safe_get(frontend, 'version', '')}".strip())
 
                 database = safe_get(stack, "database", {})
                 if isinstance(database, dict):
@@ -1272,10 +1275,10 @@ class Orchestrator:
     # =========================================================================
 
     async def process_question(
-        self,
-        project_id: str,
-        question: str,
-        conversation_id: Optional[str] = None,
+            self,
+            project_id: str,
+            question: str,
+            conversation_id: Optional[str] = None,
     ) -> Tuple[Intent, RetrievedContext, str]:
         """Process a question without code generation."""
         logger.info(f"[CONDUCTOR] Processing question for project={project_id}")

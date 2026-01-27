@@ -19,6 +19,7 @@ Key Features:
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -38,7 +39,6 @@ from app.agents.intent_schema import (
 )
 from app.agents.nova_system_prompt import NOVA_SYSTEM_PROMPT
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ MODEL_MAP = {
     "sonnet": ClaudeModel.SONNET,
     "opus": ClaudeModel.OPUS,
 }
+
 
 @dataclass
 class Intent:

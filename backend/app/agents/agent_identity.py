@@ -5,20 +5,21 @@ Defines named AI agents with distinct personalities, colors, avatars,
 and characteristic communication styles for the multi-agent chat experience.
 """
 
+import random
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Dict, Any
-import random
 
 
 class AgentType(str, Enum):
     """Agent type identifiers."""
-    NOVA = "nova"              # Intent Analyzer
-    SCOUT = "scout"            # Context Retriever
-    BLUEPRINT = "blueprint"    # Planner
-    FORGE = "forge"            # Executor
-    GUARDIAN = "guardian"      # Validator
-    CONDUCTOR = "conductor"    # Orchestrator
+    NOVA = "nova"  # Intent Analyzer
+    SCOUT = "scout"  # Context Retriever
+    BLUEPRINT = "blueprint"  # Planner
+    FORGE = "forge"  # Executor
+    GUARDIAN = "guardian"  # Validator
+    CONDUCTOR = "conductor"  # Orchestrator
+    PALETTE = "palette"  # UI Designer
 
 
 @dataclass
@@ -357,6 +358,51 @@ CONDUCTOR = AgentIdentity(
     ],
 )
 
+PALETTE = AgentIdentity(
+    agent_type=AgentType.PALETTE,
+    name="Palette",
+    role="UI Designer",
+    color="#EC4899",  # Pink
+    icon="palette",
+    avatar_emoji="🎨",
+    personality="The creative designer who says 'Let me craft something beautiful...'",
+    greeting_phrases=[
+        "Let me craft something beautiful...",
+        "Time to design some stunning UI!",
+        "Let's create a beautiful interface...",
+        "Ready to paint the perfect experience!",
+        "Let me bring your vision to life...",
+    ],
+    thinking_phrases=[
+        "Detecting your frontend technology...",
+        "Analyzing the design system...",
+        "Finding existing component patterns...",
+        "Planning the component architecture...",
+        "Designing the visual hierarchy...",
+        "Choosing the perfect color palette...",
+        "Crafting responsive layouts...",
+        "Adding smooth interactions...",
+        "Ensuring accessibility standards...",
+        "Polishing the details...",
+    ],
+    handoff_phrases=[
+        "Design complete! {agent}, please review the visuals.",
+        "UI is ready! {agent}, check out this beauty.",
+        "Finished designing! {agent}, validate the code.",
+        "Created the interface! Over to {agent}!",
+    ],
+    completion_phrases=[
+        "Design complete! Your UI is ready.",
+        "Beautiful! The interface has been crafted.",
+        "UI generation finished!",
+        "Your components are ready to use!",
+    ],
+    error_phrases=[
+        "I had trouble generating the UI...",
+        "The design didn't come out right. Let me try again.",
+        "Something went wrong with the component generation.",
+    ],
+)
 
 # Agent Registry
 AGENT_REGISTRY: Dict[AgentType, AgentIdentity] = {
@@ -366,6 +412,7 @@ AGENT_REGISTRY: Dict[AgentType, AgentIdentity] = {
     AgentType.FORGE: FORGE,
     AgentType.GUARDIAN: GUARDIAN,
     AgentType.CONDUCTOR: CONDUCTOR,
+    AgentType.PALETTE: PALETTE,
 }
 
 
@@ -465,6 +512,22 @@ THINKING_MESSAGES = {
         "Validating database operations...",
         "Ensuring testability...",
         "Checking PSR standards...",
+    ],
+    "design": [
+        "Detecting the frontend framework...",
+        "Analyzing the design system...",
+        "Finding existing components...",
+        "Planning the component architecture...",
+        "Designing the visual hierarchy...",
+        "Creating responsive layouts...",
+        "Styling with design tokens...",
+        "Adding interactive elements...",
+        "Implementing accessibility features...",
+        "Generating the component code...",
+        "Creating sub-components...",
+        "Adding loading states...",
+        "Implementing error handling...",
+        "Polishing the final design...",
     ],
 }
 

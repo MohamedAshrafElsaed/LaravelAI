@@ -7,13 +7,12 @@ Bridges Database <-> ConversationSummary <-> Agents.
 import logging
 from typing import Optional, List, Tuple, Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.conversation_summary import (
     ConversationSummary,
     RecentMessage,
-    create_recent_message_from_history,
     build_conversation_context,
 )
 from app.models.models import Conversation, Message
@@ -29,9 +28,9 @@ class ConversationContextManager:
         self._cache: dict[str, ConversationSummary] = {}
 
     async def load_or_create(
-        self,
-        conversation_id: str,
-        project_name: Optional[str] = None,
+            self,
+            conversation_id: str,
+            project_name: Optional[str] = None,
     ) -> ConversationSummary:
         """Load existing summary or create new one."""
         if conversation_id in self._cache:
@@ -60,10 +59,10 @@ class ConversationContextManager:
         return summary
 
     async def get_context_for_agents(
-        self,
-        conversation_id: str,
-        history_limit: int = 10,
-        recent_limit: int = 4,
+            self,
+            conversation_id: str,
+            history_limit: int = 10,
+            recent_limit: int = 4,
     ) -> Tuple[ConversationSummary, List[RecentMessage]]:
         """Get complete context for agent consumption."""
         summary = await self.load_or_create(conversation_id)
@@ -76,9 +75,9 @@ class ConversationContextManager:
         return summary, recent_messages
 
     async def _get_message_history(
-        self,
-        conversation_id: str,
-        limit: int = 10,
+            self,
+            conversation_id: str,
+            limit: int = 10,
     ) -> List[dict]:
         """Fetch message history from database."""
         stmt = (
@@ -101,13 +100,13 @@ class ConversationContextManager:
         return history
 
     async def update_after_execution(
-        self,
-        conversation_id: str,
-        task_completed: str,
-        files_modified: List[str],
-        execution_results: Optional[List[Any]] = None,
-        new_decisions: Optional[List[str]] = None,
-        new_pending: Optional[List[str]] = None,
+            self,
+            conversation_id: str,
+            task_completed: str,
+            files_modified: List[str],
+            execution_results: Optional[List[Any]] = None,
+            new_decisions: Optional[List[str]] = None,
+            new_pending: Optional[List[str]] = None,
     ) -> ConversationSummary:
         """Update summary after pipeline execution."""
         summary = await self.load_or_create(conversation_id)
@@ -124,31 +123,31 @@ class ConversationContextManager:
         return summary
 
     async def set_current_task(
-        self,
-        conversation_id: str,
-        task: str,
-        files: List[str] = None,
-        context: str = None,
+            self,
+            conversation_id: str,
+            task: str,
+            files: List[str] = None,
+            context: str = None,
     ) -> None:
         """Set current working task in summary."""
         summary = await self.load_or_create(conversation_id)
         summary.set_current_task(task, files, context)
 
     async def add_message(
-        self,
-        conversation_id: str,
-        role: str,
-        content: str,
-        has_code_changes: bool = False,
+            self,
+            conversation_id: str,
+            role: str,
+            content: str,
+            has_code_changes: bool = False,
     ) -> None:
         """Add a message to the summary's recent history."""
         summary = await self.load_or_create(conversation_id)
         summary.add_message(role, content, has_code_changes)
 
     async def persist(
-        self,
-        conversation_id: str,
-        summary: Optional[ConversationSummary] = None,
+            self,
+            conversation_id: str,
+            summary: Optional[ConversationSummary] = None,
     ) -> None:
         """Persist summary to database."""
         if summary is None:

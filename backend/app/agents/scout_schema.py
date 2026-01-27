@@ -4,9 +4,10 @@ Scout Schema - Strict Pydantic models for Context Retriever output.
 Scout retrieves code context from the indexed codebase.
 Output is strictly validated to ensure grounded, verifiable results.
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import List, Dict, Any
+
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ConfidenceLevel(str, Enum):

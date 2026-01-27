@@ -259,7 +259,6 @@ Chunk 5: routes/api.php (score: 0.55)
 </example>
 </examples>"""
 
-
 SCOUT_RERANK_PROMPT = """Evaluate these search results and identify ONLY chunks relevant to the user's request.
 
 <request>

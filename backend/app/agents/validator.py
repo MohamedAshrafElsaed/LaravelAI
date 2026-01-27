@@ -11,18 +11,18 @@ ENHANCEMENTS:
 - Improved contradiction detection with issue signatures
 - Enhanced quick checks for PHP/Blade/Routes
 """
+import hashlib
 import json
 import logging
 import re
-import hashlib
-from typing import Optional, List, Dict, Any, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Optional, List, Dict, Set, Tuple
 
-from app.agents.intent_analyzer import Intent
-from app.agents.context_retriever import RetrievedContext, CodeChunk
-from app.agents.executor import ExecutionResult
 from app.agents.config import AgentConfig, agent_config
+from app.agents.context_retriever import RetrievedContext
+from app.agents.executor import ExecutionResult
+from app.agents.intent_analyzer import Intent
 from app.services.claude import ClaudeService, ClaudeModel, get_claude_service
 
 logger = logging.getLogger(__name__)
@@ -368,7 +368,6 @@ RULES:
 - Messages MUST include what's wrong AND how to fix it
 </output_format>"""
 
-
 # USER prompt template with pattern context
 VALIDATION_USER_PROMPT = """<validation_request>
 <user_request>{user_input}</user_request>
@@ -609,7 +608,7 @@ class ContradictionTracker:
                 # Check for contradictory language
                 for pattern_a, pattern_b in self.CONTRADICTION_PATTERNS:
                     if (pattern_a in curr_msg and pattern_b in prev_msg) or \
-                       (pattern_b in curr_msg and pattern_a in prev_msg):
+                            (pattern_b in curr_msg and pattern_a in prev_msg):
                         contradictions.append(ContradictionInfo(
                             file=curr_issue.file,
                             previous_message=prev_issue.message,
@@ -664,7 +663,8 @@ class QuickValidator:
             issues.append("Files in app/ directory should have a namespace declaration")
 
         # Check for class in class-type files
-        class_file_patterns = ["Controller", "Model", "Service", "Repository", "Request", "Resource", "Job", "Event", "Listener", "Policy", "Rule"]
+        class_file_patterns = ["Controller", "Model", "Service", "Repository", "Request", "Resource", "Job", "Event",
+                               "Listener", "Policy", "Rule"]
         if any(p in file_path for p in class_file_patterns):
             if "class " not in content and "interface " not in content and "trait " not in content:
                 issues.append(f"Expected class/interface/trait declaration in {file_path}")
@@ -842,9 +842,9 @@ class Validator:
     """
 
     def __init__(
-        self,
-        claude_service: Optional[ClaudeService] = None,
-        config: Optional[AgentConfig] = None,
+            self,
+            claude_service: Optional[ClaudeService] = None,
+            config: Optional[AgentConfig] = None,
     ):
         """Initialize the validator."""
         self.claude = claude_service or get_claude_service()
@@ -854,11 +854,11 @@ class Validator:
         logger.info("[GUARDIAN] Initialized with enhanced validation")
 
     async def validate(
-        self,
-        user_input: str,
-        intent: Intent,
-        results: List[ExecutionResult],
-        context: RetrievedContext,
+            self,
+            user_input: str,
+            intent: Intent,
+            results: List[ExecutionResult],
+            context: RetrievedContext,
     ) -> ValidationResult:
         """
         Validate execution results with chain-of-thought reasoning.
@@ -1024,7 +1024,7 @@ class Validator:
             elif result.content:
                 # Number the lines for easy reference
                 lines = result.content.split("\n")
-                numbered = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(lines))
+                numbered = "\n".join(f"{i + 1:4d} | {line}" for i, line in enumerate(lines))
                 parts.append(f"```php\n{numbered}\n```\n")
 
             if result.error:
@@ -1037,9 +1037,9 @@ class Validator:
         return self.quick_validator.quick_check(result)
 
     async def validate_single(
-        self,
-        result: ExecutionResult,
-        context: RetrievedContext,
+            self,
+            result: ExecutionResult,
+            context: RetrievedContext,
     ) -> ValidationResult:
         """Validate a single execution result."""
         quick_issues = await self.quick_check(result)

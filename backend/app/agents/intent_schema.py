@@ -4,8 +4,9 @@ Intent Schema - Strict Pydantic models for Nova's structured output.
 Uses Claude's Structured Outputs feature for guaranteed schema compliance.
 Optimized for Laravel applications.
 """
-from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
+
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class TaskType(str, Enum):
@@ -40,25 +41,25 @@ class Priority(str, Enum):
 
 # Laravel-specific domains (single source of truth)
 LARAVEL_DOMAINS = [
-    "auth",           # Authentication, guards, login, registration
-    "models",         # Eloquent models, relationships, scopes
-    "controllers",    # HTTP controllers, request handling
-    "services",       # Service classes, business logic
-    "middleware",     # HTTP middleware
-    "validation",     # Form requests, validation rules
-    "database",       # Migrations, seeders, factories
-    "routing",        # Routes, route groups, resource routes
-    "api",            # API routes, resources, transformers
-    "queue",          # Jobs, queues, workers
-    "events",         # Events, listeners, subscribers
-    "mail",           # Mailables, notifications
-    "cache",          # Caching logic
-    "storage",        # File storage, uploads
-    "views",          # Blade templates, components
-    "policies",       # Authorization policies
-    "providers",      # Service providers
-    "commands",       # Artisan commands
-    "tests",          # Feature/Unit tests
+    "auth",  # Authentication, guards, login, registration
+    "models",  # Eloquent models, relationships, scopes
+    "controllers",  # HTTP controllers, request handling
+    "services",  # Service classes, business logic
+    "middleware",  # HTTP middleware
+    "validation",  # Form requests, validation rules
+    "database",  # Migrations, seeders, factories
+    "routing",  # Routes, route groups, resource routes
+    "api",  # API routes, resources, transformers
+    "queue",  # Jobs, queues, workers
+    "events",  # Events, listeners, subscribers
+    "mail",  # Mailables, notifications
+    "cache",  # Caching logic
+    "storage",  # File storage, uploads
+    "views",  # Blade templates, components
+    "policies",  # Authorization policies
+    "providers",  # Service providers
+    "commands",  # Artisan commands
+    "tests",  # Feature/Unit tests
 ]
 
 

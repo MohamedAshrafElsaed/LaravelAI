@@ -8,19 +8,17 @@ UPDATED: Removed fallback context injection per no-guessing policy.
          Insufficient results -> insufficient confidence (no filler files).
 """
 import logging
-from typing import Optional, List
 from dataclasses import dataclass, field
+from typing import Optional, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.agents.intent_analyzer import Intent
 from app.agents.config import AgentConfig, agent_config
 from app.agents.exceptions import InsufficientContextError
-from app.services.vector_store import VectorStore
-from app.services.embeddings import EmbeddingService, EmbeddingProvider
-from app.models.models import Project, IndexedFile
+from app.agents.intent_analyzer import Intent
 from app.core.config import settings
+from app.services.embeddings import EmbeddingService, EmbeddingProvider
+from app.services.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +101,8 @@ class RetrievedContext:
                 if chunk.file_path != current_file:
                     current_file = chunk.file_path
                     parts.append(f"\n### File: {chunk.file_path} (score: {chunk.score:.2f})")
-                parts.append(f"```php\n// Lines {chunk.start_line}-{chunk.end_line} ({chunk.chunk_type})\n{chunk.content}\n```")
+                parts.append(
+                    f"```php\n// Lines {chunk.start_line}-{chunk.end_line} ({chunk.chunk_type})\n{chunk.content}\n```")
         else:
             parts.append("\n## ⚠️ No Relevant Code Found")
             parts.append("No matching code chunks were found in the codebase index.")
@@ -155,11 +154,11 @@ class ContextRetriever:
     """
 
     def __init__(
-        self,
-        db: AsyncSession,
-        vector_store: Optional[VectorStore] = None,
-        embedding_service: Optional[EmbeddingService] = None,
-        config: Optional[AgentConfig] = None,
+            self,
+            db: AsyncSession,
+            vector_store: Optional[VectorStore] = None,
+            embedding_service: Optional[EmbeddingService] = None,
+            config: Optional[AgentConfig] = None,
     ):
         """
         Initialize the context retriever.
@@ -190,11 +189,11 @@ class ContextRetriever:
             self.embedding_service = EmbeddingService(provider=provider)
 
     async def retrieve(
-        self,
-        project_id: str,
-        intent: Intent,
-        token_budget: int = DEFAULT_TOKEN_BUDGET,
-        require_minimum: bool = True,  # Can override safety check
+            self,
+            project_id: str,
+            intent: Intent,
+            token_budget: int = DEFAULT_TOKEN_BUDGET,
+            require_minimum: bool = True,  # Can override safety check
     ) -> RetrievedContext:
         """
         Retrieve relevant context based on intent.
@@ -278,12 +277,12 @@ class ContextRetriever:
         return context
 
     async def _search_with_threshold(
-        self,
-        project_id: str,
-        queries: List[str],
-        context: RetrievedContext,
-        threshold: float,
-        token_budget: int,
+            self,
+            project_id: str,
+            queries: List[str],
+            context: RetrievedContext,
+            threshold: float,
+            token_budget: int,
     ) -> None:
         """Search vector store with specific threshold."""
         used_tokens = sum(c.estimated_tokens for c in context.chunks)
@@ -366,11 +365,11 @@ class ContextRetriever:
                 continue
 
     async def _add_related_files(
-        self,
-        project_id: str,
-        file_paths: List[str],
-        context: RetrievedContext,
-        token_budget: int,
+            self,
+            project_id: str,
+            file_paths: List[str],
+            context: RetrievedContext,
+            token_budget: int,
     ) -> None:
         """Add related files to context (only files that exist in index)."""
         used_tokens = sum(c.estimated_tokens for c in context.chunks)
@@ -401,9 +400,9 @@ class ContextRetriever:
     # when retrieval yields insufficient results.
 
     async def _expand_related_files(
-        self,
-        project_id: str,
-        file_paths: List[str],
+            self,
+            project_id: str,
+            file_paths: List[str],
     ) -> List[str]:
         """
         Find related files based on Laravel conventions.
@@ -452,30 +451,23 @@ class ContextRetriever:
         return list(set(related))
 
     async def _get_file_content(
-        self,
-        project_id: str,
-        file_path: str,
+            self,
+            project_id: str,
+            file_path: str,
     ) -> Optional[str]:
-        """Get file content from the database."""
+        """Get file content from database with filesystem fallback."""
         try:
-            stmt = select(IndexedFile).where(
-                IndexedFile.project_id == project_id,
-                IndexedFile.file_path == file_path,
-            )
-            result = await self.db.execute(stmt)
-            indexed_file = result.scalar_one_or_none()
-
-            if indexed_file and indexed_file.content:
-                return indexed_file.content
+            # Use FileAccessService (DB first, then filesystem fallback)
+            content = await self.file_access.get_file_content(project_id, file_path)
+            return content
         except Exception as e:
             logger.debug(f"[CONTEXT_RETRIEVER] Error fetching file content: {e}")
-
-        return None
+            return None
 
     async def _get_domain_summaries(
-        self,
-        project_id: str,
-        domains: List[str],
+            self,
+            project_id: str,
+            domains: List[str],
     ) -> dict:
         """
         Get summaries for affected domains.

@@ -8,11 +8,11 @@ class AgentException(Exception):
     """Base exception for all agent errors."""
 
     def __init__(
-        self,
-        message: str,
-        agent: str,
-        recoverable: bool = False,
-        details: Optional[Dict[str, Any]] = None
+            self,
+            message: str,
+            agent: str,
+            recoverable: bool = False,
+            details: Optional[Dict[str, Any]] = None
     ):
         super().__init__(message)
         self.message = message
@@ -33,10 +33,10 @@ class InsufficientContextError(AgentException):
     """Raised when context retrieval returns insufficient results."""
 
     def __init__(
-        self,
-        message: str = "Insufficient codebase context to proceed safely",
-        chunks_found: int = 0,
-        queries_tried: Optional[List[str]] = None
+            self,
+            message: str = "Insufficient codebase context to proceed safely",
+            chunks_found: int = 0,
+            queries_tried: Optional[List[str]] = None
     ):
         super().__init__(
             message=message,
